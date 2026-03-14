@@ -67,9 +67,56 @@ interface GhPrViewReviewResponse {
   reviews: Array<{
     author: { login: string };
     body: string;
-    comments: Array<{ body: string; path: string; line: number; author: { login: string } }>;
   }>;
   files: Array<{ path: string }>;
+}
+
+interface GhPrApiReviewCommentResponse {
+  body: string;
+  path: string;
+  line: number | null;
+  original_line?: number | null;
+  user: { login: string };
+}
+
+const INLINE_REVIEW_COMMENTS_PER_PAGE = 100;
+
+function fetchInlineReviewComments(owner: string, repo: string, prNumber: number): GhPrApiReviewCommentResponse[] {
+  const comments: GhPrApiReviewCommentResponse[] = [];
+  let page = 1;
+
+  while (true) {
+    const rawInlineReviewComments = execFileSync(
+      'gh',
+      ['api', `/repos/${owner}/${repo}/pulls/${prNumber}/comments?per_page=${INLINE_REVIEW_COMMENTS_PER_PAGE}&page=${page}`],
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const inlineReviewComments = JSON.parse(rawInlineReviewComments) as GhPrApiReviewCommentResponse[];
+
+    comments.push(...inlineReviewComments);
+
+    if (inlineReviewComments.length < INLINE_REVIEW_COMMENTS_PER_PAGE) {
+      return comments;
+    }
+
+    page += 1;
+  }
+}
+
+function parseRepositoryFromPrUrl(prUrl: string): { owner: string; repo: string } {
+  const parsed = new URL(prUrl);
+  const pathSegments = parsed.pathname.split('/').filter(Boolean);
+
+  if (pathSegments.length < 4 || pathSegments[2] !== 'pull') {
+    throw new Error(`Unexpected pull request URL format: ${prUrl}`);
+  }
+
+  const [owner, repo] = pathSegments;
+  if (!owner || !repo) {
+    throw new Error(`Repository owner/repo is missing in pull request URL: ${prUrl}`);
+  }
+
+  return { owner, repo };
 }
 
 /**
@@ -86,6 +133,9 @@ export function fetchPrReviewComments(prNumber: number): PrReviewData {
   );
 
   const data = JSON.parse(raw) as GhPrViewReviewResponse;
+  const { owner, repo } = parseRepositoryFromPrUrl(data.url);
+
+  const inlineReviewComments = fetchInlineReviewComments(owner, repo, prNumber);
 
   const comments: PrReviewComment[] = data.comments.map((c) => ({
     author: c.author.login,
@@ -97,14 +147,14 @@ export function fetchPrReviewComments(prNumber: number): PrReviewData {
     if (review.body) {
       reviews.push({ author: review.author.login, body: review.body });
     }
-    for (const comment of review.comments) {
-      reviews.push({
-        author: comment.author.login,
-        body: comment.body,
-        path: comment.path,
-        line: comment.line,
-      });
-    }
+  }
+  for (const comment of inlineReviewComments) {
+    reviews.push({
+      author: comment.user.login,
+      body: comment.body,
+      path: comment.path,
+      line: comment.line ?? comment.original_line ?? undefined,
+    });
   }
 
   return {

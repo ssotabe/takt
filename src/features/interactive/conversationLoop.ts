@@ -127,21 +127,10 @@ export async function runConversationLoop(
 
   if (initialInput) {
     history.push({ role: 'user', content: initialInput });
-    log.debug('Processing initial input', { initialInput, sessionId });
-
-    const promptWithTransform = strategy.transformPrompt(initialInput);
-    const result = await doCallAI(promptWithTransform, strategy.systemPrompt, strategy.allowedTools);
-    if (result) {
-      if (!result.success) {
-        error(result.content);
-        blankLine();
-        return { action: 'cancel', task: '' };
-      }
-      history.push({ role: 'assistant', content: result.content });
-      blankLine();
-    } else {
-      history.pop();
-    }
+    log.debug('Loaded initial input into local history without auto-submitting to AI', {
+      initialInput,
+      sessionId,
+    });
   }
 
   async function handleSummaryAction(task: string): Promise<InteractiveModeResult | null> {

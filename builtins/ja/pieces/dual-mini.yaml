@@ -57,6 +57,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - backend
@@ -160,6 +161,7 @@ movements:
         policy:
           - coding
           - testing
+          - design-fidelity
         knowledge:
           - frontend
           - backend
@@ -187,6 +189,7 @@ movements:
         policy:
           - coding
           - testing
+          - design-fidelity
         knowledge:
           - frontend
           - backend
@@ -218,6 +221,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - backend
@@ -250,6 +254,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - backend

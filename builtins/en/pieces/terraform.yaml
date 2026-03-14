@@ -51,7 +51,6 @@ movements:
           - Bash
           - WebSearch
           - WebFetch
-    required_permission_mode: full
     quality_gates:
       - terraform fmt -check passes without errors
       - terraform validate succeeds
@@ -176,7 +175,6 @@ movements:
               - Bash
               - WebSearch
               - WebFetch
-        required_permission_mode: full
         rules:
           - condition: AI issue fix complete
           - condition: No fix needed (target file/spec verified)
@@ -198,7 +196,6 @@ movements:
               - Bash
               - WebSearch
               - WebFetch
-        required_permission_mode: full
         rules:
           - condition: Supervisor's findings have been fixed
           - condition: Cannot proceed with fix
@@ -225,7 +222,6 @@ movements:
           - Bash
           - WebSearch
           - WebFetch
-    required_permission_mode: full
     pass_previous_response: false
     rules:
       - condition: AI issue fix complete
@@ -252,7 +248,6 @@ movements:
           - Bash
           - WebSearch
           - WebFetch
-    required_permission_mode: full
     pass_previous_response: false
     rules:
       - condition: Supervisor's findings have been fixed

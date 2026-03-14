@@ -72,6 +72,8 @@ movements:
     knowledge:
       - takt
       - architecture
+      - unit-testing
+      - e2e-testing
     provider_options:
       claude:
         allowed_tools:
@@ -305,6 +307,9 @@ movements:
         policy:
           - review
           - testing
+        knowledge:
+          - unit-testing
+          - e2e-testing
         provider_options:
           claude:
             allowed_tools:

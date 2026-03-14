@@ -68,6 +68,8 @@ movements:
     knowledge:
       - frontend
       - architecture
+      - unit-testing
+      - e2e-testing
     provider_options:
       claude:
         allowed_tools:
@@ -104,6 +106,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     session: refresh
     knowledge:
       - frontend
@@ -168,6 +171,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     session: refresh
     knowledge:
       - frontend
@@ -237,7 +241,9 @@ movements:
       - name: frontend-review
         edit: false
         persona: frontend-reviewer
-        policy: review
+        policy:
+          - review
+          - design-fidelity
         knowledge: frontend
         provider_options:
           claude:
@@ -261,6 +267,9 @@ movements:
         policy:
           - review
           - testing
+        knowledge:
+          - unit-testing
+          - e2e-testing
         provider_options:
           claude:
             allowed_tools:
@@ -338,6 +347,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - security
@@ -393,6 +403,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - security

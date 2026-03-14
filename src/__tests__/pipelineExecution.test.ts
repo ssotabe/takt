@@ -350,7 +350,8 @@ describe('executePipeline', () => {
         (call: unknown[]) => call[0] === 'git' && (call[1] as string[])[0] === 'commit',
       );
       expect(commitCall).toBeDefined();
-      expect((commitCall![1] as string[])[2]).toBe('fix: Login broken (#42)');
+      const commitArgs = commitCall![1] as string[];
+      expect(commitArgs[commitArgs.indexOf('-m') + 1]).toBe('fix: Login broken (#42)');
     });
 
     it('should use default_branch_prefix when configured', async () => {

@@ -206,41 +206,41 @@ describe('interactiveMode', () => {
     expect(prompt).toContain('test message');
   });
 
-  it('should process initialInput as first message before entering loop', async () => {
+  it('should not auto-submit initialInput before user interaction', async () => {
     // Given: initialInput provided, then user types /go
     setupRawStdin(toRawInputs(['/go']));
-    setupMockProvider(['What do you mean by "a"?', 'Clarify task for "a".']);
+    setupMockProvider(['Clarify task for "a".']);
 
     // When
     const result = await interactiveMode('/project', 'a');
 
-    // Then: AI should have been called with initialInput (with policy injected)
+    // Then: initial input is kept in local history and only /go summary call reaches AI
     const mockProvider = mockGetProvider.mock.results[0]!.value as { _call: ReturnType<typeof vi.fn> };
-    expect(mockProvider._call).toHaveBeenCalledTimes(2);
+    expect(mockProvider._call).toHaveBeenCalledTimes(1);
     const firstPrompt = mockProvider._call.mock.calls[0]?.[0] as string;
-    expect(firstPrompt).toContain('## Policy');
-    expect(firstPrompt).toContain('a');
+    expect(firstPrompt).toContain('Conversation:');
+    expect(firstPrompt).toContain('User: a');
 
-    // /go should work because initialInput already started conversation
     expect(result.action).toBe('execute');
     expect(result.task).toBe('Clarify task for "a".');
   });
 
-  it('should send only current input for subsequent turns after initialInput', async () => {
+  it('should send only explicit user turns and include initialInput in summary context', async () => {
     // Given: initialInput, then follow-up, then /go
     setupRawStdin(toRawInputs(['fix the login page', '/go']));
-    setupMockProvider(['What about "a"?', 'Got it, fixing login page.', 'Fix login page with clarified scope.']);
+    setupMockProvider(['Got it, fixing login page.', 'Fix login page with clarified scope.']);
 
     // When
     const result = await interactiveMode('/project', 'a');
 
-    // Then: each call receives only its own input with policy (session handles history)
+    // Then: first AI call is from explicit follow-up input, second is /go summary
     const mockProvider = mockGetProvider.mock.results[0]!.value as { _call: ReturnType<typeof vi.fn> };
-    expect(mockProvider._call).toHaveBeenCalledTimes(3);
+    expect(mockProvider._call).toHaveBeenCalledTimes(2);
     const firstPrompt = mockProvider._call.mock.calls[0]?.[0] as string;
     const secondPrompt = mockProvider._call.mock.calls[1]?.[0] as string;
-    expect(firstPrompt).toContain('a');
-    expect(secondPrompt).toContain('fix the login page');
+    expect(firstPrompt).toContain('fix the login page');
+    expect(secondPrompt).toContain('User: a');
+    expect(secondPrompt).toContain('User: fix the login page');
 
     // Task still contains all history for downstream use
     expect(result.action).toBe('execute');
@@ -322,32 +322,18 @@ describe('interactiveMode', () => {
     expect(setupArgs.systemPrompt).not.toContain('Previous Run Reference');
   });
 
-  it('should abort in-flight provider call on SIGINT during initial input', async () => {
+  it('should not start provider call from initial input alone', async () => {
+    const mockCall = vi.fn();
     mockGetProvider.mockReturnValue({
       setup: () => ({
-        call: vi.fn((_prompt: string, options: { abortSignal?: AbortSignal }) => {
-          return new Promise((resolve) => {
-            options.abortSignal?.addEventListener('abort', () => {
-              resolve({
-                persona: 'interactive',
-                status: 'error',
-                content: 'aborted',
-                timestamp: new Date(),
-              });
-            }, { once: true });
-          });
-        }),
+        call: mockCall,
       }),
     } as unknown as ReturnType<typeof getProvider>);
 
-    const promise = interactiveMode('/project', 'trigger');
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-    const listeners = process.rawListeners('SIGINT') as Array<() => void>;
-    listeners[listeners.length - 1]?.();
-
-    const result = await promise;
+    setupRawStdin(toRawInputs(['/cancel']));
+    const result = await interactiveMode('/project', 'trigger');
     expect(result.action).toBe('cancel');
+    expect(mockCall).not.toHaveBeenCalled();
   });
 
   it('should use saved sessionId from initializeSession when no sessionId parameter is given', async () => {

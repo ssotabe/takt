@@ -67,6 +67,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     session: refresh
     knowledge:
       - frontend
@@ -133,6 +134,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     session: refresh
     knowledge:
       - frontend
@@ -204,7 +206,9 @@ movements:
       - name: frontend-review
         edit: false
         persona: frontend-reviewer
-        policy: review
+        policy:
+          - review
+          - design-fidelity
         knowledge: frontend
         provider_options:
           claude:
@@ -276,6 +280,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - backend
@@ -333,6 +338,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - backend

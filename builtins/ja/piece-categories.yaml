@@ -47,10 +47,11 @@ piece_categories:
       - review-fix-backend-cqrs
       - review-takt-default
       - review-fix-takt-default
+      - security-audit
   🧪 テスト:
     pieces:
-      - unit-test
-      - e2e-test
+      - fill-unit
+      - fill-e2e
   🎵 TAKT開発:
     pieces:
       - takt-default

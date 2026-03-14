@@ -104,6 +104,8 @@ interactive_preview_movements: 3  # Movement previews in interactive mode (0-10,
 | `task_poll_interval_ms` | number (100-5000) | `500` | Polling interval for new tasks |
 | `interactive_preview_movements` | number (0-10) | `3` | Movement previews in interactive mode |
 | `worktree_dir` | string | - | Directory for shared clones (defaults to `../{clone-name}`) |
+| `allow_git_hooks` | boolean | `false` | Allow git hooks during TAKT-managed auto-commit |
+| `allow_git_filters` | boolean | `false` | Allow git filters during TAKT-managed auto-commit |
 | `auto_pr` | boolean | - | Auto-create PR after worktree execution |
 | `verbose` | boolean | - | Verbose output mode |
 | `minimal_output` | boolean | `false` | Suppress AI output (for CI) |
@@ -161,6 +163,8 @@ concurrency: 2                # Parallel task count for takt run in this project
 | `piece` | string | `"default"` | Current piece name for this project |
 | `provider` | `"claude"` \| `"codex"` \| `"opencode"` \| `"cursor"` \| `"copilot"` \| `"mock"` | - | Override provider |
 | `model` | string | - | Override model name (passed to provider as-is) |
+| `allow_git_hooks` | boolean | `false` | Allow git hooks during TAKT-managed auto-commit |
+| `allow_git_filters` | boolean | `false` | Allow git filters during TAKT-managed auto-commit |
 | `auto_pr` | boolean | - | Auto-create PR after worktree execution |
 | `verbose` | boolean | - | Verbose output mode |
 | `concurrency` | number (1-10) | `1` (from global) | Parallel task count for `takt run` |

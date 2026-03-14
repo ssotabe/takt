@@ -463,10 +463,10 @@ describe('personaMode', () => {
     );
   });
 
-  it('should process initialInput as first message', async () => {
+  it('should keep initialInput in local history until the user acts', async () => {
     // Given
     setupRawStdin(toRawInputs(['/go']));
-    setupMockProvider(['I analyzed the issue.', 'Task summary.']);
+    setupMockProvider(['Task summary.']);
     mockSelectOption.mockResolvedValue('execute');
 
     // When
@@ -475,9 +475,10 @@ describe('personaMode', () => {
     // Then
     expect(result.action).toBe('execute');
     const mockProvider = mockGetProvider.mock.results[0]!.value as { _call: ReturnType<typeof vi.fn> };
-    expect(mockProvider._call).toHaveBeenCalledTimes(2);
+    expect(mockProvider._call).toHaveBeenCalledTimes(1);
     const firstPrompt = mockProvider._call.mock.calls[0]?.[0] as string;
-    expect(firstPrompt).toBe('fix the login');
+    expect(firstPrompt).toContain('Conversation:');
+    expect(firstPrompt).toContain('User: fix the login');
   });
 
   it('should handle /play command', async () => {

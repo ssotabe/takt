@@ -29,7 +29,9 @@ Every behavior change requires a corresponding test, and every bug fix requires 
 |----------|--------|
 | High | Business logic, state transitions |
 | Medium | Edge cases, error handling |
-| Low | Simple CRUD, UI appearance |
+| Low | Simple CRUD |
+
+**Note:** When a design reference is provided, UI appearance verification is elevated to medium priority. Refer to the Design Fidelity Policy.
 
 ## Test Structure: Given-When-Then
 
@@ -80,6 +82,26 @@ Verify data flow coupling that unit tests alone cannot cover.
 | New status/state merging into an existing workflow | Integration test for the full transition flow required |
 | New option propagating through a call chain to the endpoint | End-to-end chain coupling test required |
 | All module-level unit tests pass | Unit tests alone are sufficient (when none of the above apply) |
+
+## Unit Test Criteria
+
+| Criteria | Verdict |
+|----------|---------|
+| Mocking the internal implementation of the test target (testing implementation, not behavior) | REJECT |
+| Sharing and mutating fixtures between tests | REJECT. Loss of test independence |
+| Mock return values diverging from actual types | Warning. Use type-safe mocks |
+| Only testing happy paths without boundary values | Warning |
+
+## E2E Test Criteria
+
+| Criteria | Verdict |
+|----------|---------|
+| Hitting production APIs without mocking external calls | REJECT. Test reproducibility is lost |
+| Mocking the core logic under test | REJECT. Defeats the purpose of E2E |
+| Using fixed sleep for timing synchronization | REJECT. Use state-based waits |
+| Sharing state between tests | Warning. Test independence is compromised |
+| Only testing happy paths without error flows | Warning |
+| Writing E2E tests for logic that unit tests can cover | Warning |
 
 ## Test Environment Isolation
 

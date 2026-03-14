@@ -75,7 +75,9 @@ movements:
       - name: frontend-review
         edit: false
         persona: frontend-reviewer
-        policy: review
+        policy:
+          - review
+          - design-fidelity
         knowledge: frontend
         provider_options:
           claude:
@@ -151,6 +153,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - security
@@ -208,6 +211,7 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - security

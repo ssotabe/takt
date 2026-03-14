@@ -83,6 +83,8 @@ movements:
       - testing
     knowledge:
       - architecture
+      - unit-testing
+      - e2e-testing
     provider_options:
       claude:
         allowed_tools:

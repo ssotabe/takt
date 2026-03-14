@@ -1,12 +1,19 @@
 Review the changes from a frontend development perspective.
 
 **Review criteria:**
+- Design fidelity (top priority when a design reference is provided)
 - Component design (separation of concerns, granularity)
 - State management (local vs. global decisions)
 - Performance (re-renders, memoization)
 - Accessibility (keyboard navigation, ARIA)
 - Data fetching patterns
 - TypeScript type safety
+
+**Design fidelity check (when a design reference exists):**
+1. Identify the design reference from the task order's referenced materials
+2. Compare design elements (layout, wording, colors, spacing) against implementation element by element
+3. For any discrepancy, check the decisions log to determine if it was intentional
+4. Report unintentional discrepancies as blocking issues
 
 **Note**: If this project does not include a frontend,
 proceed as no issues found.

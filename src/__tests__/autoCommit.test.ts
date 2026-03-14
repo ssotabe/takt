@@ -10,22 +10,35 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
+const mockResolveConfigValue = vi.fn(() => undefined);
+vi.mock('../infra/config/index.js', () => ({
+  resolveConfigValue: (...args: unknown[]) => mockResolveConfigValue(...args),
+}));
+
 import { execFileSync } from 'node:child_process';
 const mockExecFileSync = vi.mocked(execFileSync);
 
+function includesCommand(args: readonly string[], command: string): boolean {
+  return args.includes(command);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockResolveConfigValue.mockReturnValue(undefined);
 });
 
 describe('autoCommitAndPush', () => {
   it('should create a commit and push when there are changes', () => {
-    mockExecFileSync.mockImplementation((cmd, args) => {
+    mockExecFileSync.mockImplementation((_cmd, args) => {
       const argsArr = args as string[];
-      if (argsArr[0] === 'status') {
+      if (includesCommand(argsArr, 'status')) {
         return 'M src/index.ts\n';
       }
-      if (argsArr[0] === 'rev-parse') {
+      if (includesCommand(argsArr, 'rev-parse')) {
         return 'abc1234\n';
+      }
+      if (includesCommand(argsArr, 'config')) {
+        return 'filter.test.clean\nfilter.test.required\n';
       }
       return Buffer.from('');
     });
@@ -36,18 +49,34 @@ describe('autoCommitAndPush', () => {
     expect(result.commitHash).toBe('abc1234');
     expect(result.message).toContain('abc1234');
 
-    // Verify git add -A was called
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      ['add', '-A'],
-      expect.objectContaining({ cwd: '/tmp/clone' })
+    const addCall = mockExecFileSync.mock.calls.find(
+      call => includesCommand(call[1] as string[], 'add')
     );
+    expect(addCall).toBeDefined();
+    expect(addCall![0]).toBe('git');
+    expect(addCall![1]).toEqual(['add', '-A']);
+    expect(addCall![2]).toEqual(expect.objectContaining({
+      cwd: '/tmp/clone',
+      env: expect.objectContaining({
+        GIT_CONFIG_COUNT: '3',
+        GIT_CONFIG_KEY_0: 'core.hooksPath',
+        GIT_CONFIG_KEY_1: 'filter.test.clean',
+        GIT_CONFIG_VALUE_1: '',
+        GIT_CONFIG_KEY_2: 'filter.test.required',
+        GIT_CONFIG_VALUE_2: 'false',
+      }),
+    }));
 
-    // Verify commit was called with correct message (no co-author)
+    // Verify commit was called with correct message and --no-verify
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
-      ['commit', '-m', 'takt: my-task'],
-      expect.objectContaining({ cwd: '/tmp/clone' })
+      ['commit', '--no-verify', '-m', 'takt: my-task'],
+      expect.objectContaining({
+        cwd: '/tmp/clone',
+        env: expect.objectContaining({
+          GIT_CONFIG_KEY_0: 'core.hooksPath',
+        }),
+      })
     );
 
     // Verify push was called with projectDir directly (no origin remote)
@@ -59,10 +88,13 @@ describe('autoCommitAndPush', () => {
   });
 
   it('should return success with no commit when there are no changes', () => {
-    mockExecFileSync.mockImplementation((cmd, args) => {
+    mockExecFileSync.mockImplementation((_cmd, args) => {
       const argsArr = args as string[];
-      if (argsArr[0] === 'status') {
+      if (includesCommand(argsArr, 'status')) {
         return ''; // No changes
+      }
+      if (includesCommand(argsArr, 'config')) {
+        return '';
       }
       return Buffer.from('');
     });
@@ -73,19 +105,22 @@ describe('autoCommitAndPush', () => {
     expect(result.commitHash).toBeUndefined();
     expect(result.message).toBe('No changes to commit');
 
-    // Verify git add -A was called
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['add', '-A'],
-      expect.objectContaining({ cwd: '/tmp/clone' })
+      expect.objectContaining({
+        cwd: '/tmp/clone',
+        env: expect.objectContaining({
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'core.hooksPath',
+        }),
+      })
     );
 
     // Verify commit was NOT called
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git',
-      ['commit', '-m', expect.any(String)],
-      expect.anything()
-    );
+    expect(
+      mockExecFileSync.mock.calls.some(call => includesCommand(call[1] as string[], 'commit'))
+    ).toBe(false);
 
     // Verify push was NOT called
     expect(mockExecFileSync).not.toHaveBeenCalledWith(
@@ -109,13 +144,16 @@ describe('autoCommitAndPush', () => {
   });
 
   it('should not include co-author in commit message', () => {
-    mockExecFileSync.mockImplementation((cmd, args) => {
+    mockExecFileSync.mockImplementation((_cmd, args) => {
       const argsArr = args as string[];
-      if (argsArr[0] === 'status') {
+      if (includesCommand(argsArr, 'status')) {
         return 'M file.ts\n';
       }
-      if (argsArr[0] === 'rev-parse') {
+      if (includesCommand(argsArr, 'rev-parse')) {
         return 'def5678\n';
+      }
+      if (includesCommand(argsArr, 'config')) {
+        return '';
       }
       return Buffer.from('');
     });
@@ -124,23 +162,27 @@ describe('autoCommitAndPush', () => {
 
     // Find the commit call
     const commitCall = mockExecFileSync.mock.calls.find(
-      call => (call[1] as string[])[0] === 'commit'
+      call => includesCommand(call[1] as string[], 'commit')
     );
 
     expect(commitCall).toBeDefined();
-    const commitMessage = (commitCall![1] as string[])[2];
+    const args = commitCall![1] as string[];
+    const commitMessage = args[args.indexOf('-m') + 1];
     expect(commitMessage).toBe('takt: test-task');
     expect(commitMessage).not.toContain('Co-Authored-By');
   });
 
   it('should use the correct commit message format', () => {
-    mockExecFileSync.mockImplementation((cmd, args) => {
+    mockExecFileSync.mockImplementation((_cmd, args) => {
       const argsArr = args as string[];
-      if (argsArr[0] === 'status') {
+      if (includesCommand(argsArr, 'status')) {
         return 'A new-file.ts\n';
       }
-      if (argsArr[0] === 'rev-parse') {
+      if (includesCommand(argsArr, 'rev-parse')) {
         return 'aaa1111\n';
+      }
+      if (includesCommand(argsArr, 'config')) {
+        return '';
       }
       return Buffer.from('');
     });
@@ -148,9 +190,44 @@ describe('autoCommitAndPush', () => {
     autoCommitAndPush('/tmp/clone', '認証機能を追加する', '/project');
 
     const commitCall = mockExecFileSync.mock.calls.find(
-      call => (call[1] as string[])[0] === 'commit'
+      call => includesCommand(call[1] as string[], 'commit')
     );
-    expect((commitCall![1] as string[])[2]).toBe('takt: 認証機能を追加する');
+    const args = commitCall![1] as string[];
+    expect(args[args.indexOf('-m') + 1]).toBe('takt: 認証機能を追加する');
   });
 
+  it('should allow hooks and filters only when explicitly configured', () => {
+    mockResolveConfigValue.mockImplementation((_projectDir: string, key: string) => {
+      if (key === 'allowGitHooks' || key === 'allowGitFilters') {
+        return true;
+      }
+      return undefined;
+    });
+    mockExecFileSync.mockImplementation((_cmd, args) => {
+      const argsArr = args as string[];
+      if (includesCommand(argsArr, 'status')) {
+        return 'M src/index.ts\n';
+      }
+      if (includesCommand(argsArr, 'rev-parse')) {
+        return 'abc1234\n';
+      }
+      return Buffer.from('');
+    });
+
+    autoCommitAndPush('/tmp/clone', 'my-task', '/project');
+
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['add', '-A'],
+      expect.objectContaining({ cwd: '/tmp/clone', env: undefined })
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['commit', '-m', 'takt: my-task'],
+      expect.objectContaining({ cwd: '/tmp/clone', env: undefined })
+    );
+    expect(
+      mockExecFileSync.mock.calls.some(call => includesCommand(call[1] as string[], 'config'))
+    ).toBe(false);
+  });
 });

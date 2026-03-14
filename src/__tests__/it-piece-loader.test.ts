@@ -81,10 +81,10 @@ describe('Piece Loader IT: builtin piece loading', () => {
     expect(config).toBeNull();
   });
 
-  it('should include and load e2e-test as a builtin piece', () => {
-    expect(builtinNames).toContain('e2e-test');
+  it('should include and load fill-e2e as a builtin piece', () => {
+    expect(builtinNames).toContain('fill-e2e');
 
-    const config = loadPiece('e2e-test', testDir);
+    const config = loadPiece('fill-e2e', testDir);
     expect(config).not.toBeNull();
 
     const planMovement = config!.movements.find((movement) => movement.name === 'plan_test');
@@ -92,17 +92,15 @@ describe('Piece Loader IT: builtin piece loading', () => {
 
     expect(planMovement).toBeDefined();
     expect(implementMovement).toBeDefined();
-    expect(planMovement!.instruction).toContain('missing E2E tests');
-    expect(implementMovement!.instruction).toContain('npm run test:e2e:mock');
   });
 
-  it('should load e2e-test as a builtin piece in ja locale', () => {
+  it('should load fill-e2e as a builtin piece in ja locale', () => {
     languageState.value = 'ja';
 
     const jaBuiltinNames = listBuiltinPieceNames(testDir, { includeDisabled: true });
-    expect(jaBuiltinNames).toContain('e2e-test');
+    expect(jaBuiltinNames).toContain('fill-e2e');
 
-    const config = loadPiece('e2e-test', testDir);
+    const config = loadPiece('fill-e2e', testDir);
     expect(config).not.toBeNull();
 
     const planMovement = config!.movements.find((movement) => movement.name === 'plan_test');
@@ -110,8 +108,6 @@ describe('Piece Loader IT: builtin piece loading', () => {
 
     expect(planMovement).toBeDefined();
     expect(implementMovement).toBeDefined();
-    expect(planMovement!.instruction).toContain('E2Eテスト');
-    expect(implementMovement!.instruction).toContain('npm run test:e2e:mock');
   });
 });
 

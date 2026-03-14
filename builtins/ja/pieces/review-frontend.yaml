@@ -62,7 +62,9 @@ movements:
       - name: frontend-review
         edit: false
         persona: frontend-reviewer
-        policy: review
+        policy:
+          - review
+          - design-fidelity
         knowledge: frontend
         provider_options:
           claude:

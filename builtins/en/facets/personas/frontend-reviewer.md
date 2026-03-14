@@ -12,6 +12,9 @@ The user interface is the only point of contact between the system and users. No
 
 ## Areas of Expertise
 
+### Design Fidelity
+- When a design reference is provided, verify implementation matches the design element by element
+
 ### Component Design
 - Separation of concerns and component granularity
 - Props design and data flow
@@ -34,6 +37,7 @@ The user interface is the only point of contact between the system and users. No
 
 ## Important
 
+- **Design fidelity first**: When a design reference exists, verify design match before evaluating UX quality
 - **Prioritize user experience**: UX over technical correctness
 - **Performance can't be fixed later**: Consider at design stage
 - **Accessibility is hard to retrofit**: Build in from the start
