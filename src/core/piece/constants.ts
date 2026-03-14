@@ -9,6 +9,9 @@
 export const COMPLETE_MOVEMENT = 'COMPLETE';
 export const ABORT_MOVEMENT = 'ABORT';
 
+/** Maximum nesting depth for piece_call (recursive sub-piece invocations) */
+export const MAX_PIECE_CALL_DEPTH = 5;
+
 /** Maximum user inputs to store */
 export const MAX_USER_INPUTS = 100;
 export const MAX_INPUT_LENGTH = 10000;

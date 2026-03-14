@@ -32,6 +32,8 @@ import { MovementExecutor } from './MovementExecutor.js';
 import { ParallelRunner } from './ParallelRunner.js';
 import { ArpeggioRunner } from './ArpeggioRunner.js';
 import { TeamLeaderRunner } from './TeamLeaderRunner.js';
+import { PieceCallRunner } from './PieceCallRunner.js';
+import { resolveMatchFromResponse } from '../evaluation/resolve-match.js';
 import { buildRunPaths, type RunPaths } from '../run/run-paths.js';
 import { prepareRuntimeEnvironment } from '../../runtime/runtime-environment.js';
 
@@ -67,6 +69,7 @@ export class PieceEngine extends EventEmitter {
   private readonly parallelRunner: ParallelRunner;
   private readonly arpeggioRunner: ArpeggioRunner;
   private readonly teamLeaderRunner: TeamLeaderRunner;
+  private readonly pieceCallRunner: PieceCallRunner;
   private readonly detectRuleIndex: (content: string, movementName: string) => number;
   private readonly callAiJudge: (
     agentOutput: string,
@@ -151,12 +154,26 @@ export class PieceEngine extends EventEmitter {
       },
     });
 
+    this.pieceCallRunner = new PieceCallRunner({
+      engineOptions: this.options,
+      getCwd: () => this.cwd,
+      getProjectCwd: () => this.projectCwd,
+      onMovementStart: (step, iteration, instruction, providerInfo) => {
+        this.emit('movement:start', step, iteration, instruction, providerInfo);
+      },
+      onMovementComplete: (step, response, instruction) => {
+        this.emit('movement:complete', step, response, instruction);
+      },
+    });
+
     this.parallelRunner = new ParallelRunner({
       optionsBuilder: this.optionsBuilder,
       movementExecutor: this.movementExecutor,
       engineOptions: this.options,
+      pieceCallRunner: this.pieceCallRunner,
       getCwd: () => this.cwd,
-      getReportDir: () => this.reportDir,
+      getProjectCwd: () => this.projectCwd,
+      getReportDirSlug: () => this.runPaths.slug,
       getInteractive: () => this.options.interactive === true,
       detectRuleIndex: this.detectRuleIndex,
       callAiJudge: this.callAiJudge,
@@ -410,7 +427,25 @@ export class PieceEngine extends EventEmitter {
     const updateSession = this.updatePersonaSession.bind(this);
     let result: { response: AgentResponse; instruction: string };
 
-    if (step.parallel && step.parallel.length > 0) {
+    if (step.kind === 'piece_call') {
+      const raw = await this.pieceCallRunner.runPieceCallMovement(
+        step, this.state, this.task, this.config.maxMovements,
+      );
+      const ruleCtx = {
+        state: this.state,
+        cwd: this.cwd,
+        interactive: this.options.interactive === true,
+        detectRuleIndex: this.detectRuleIndex,
+        callAiJudge: this.callAiJudge,
+      };
+      const match = await resolveMatchFromResponse(step, raw.response, ruleCtx);
+      const finalResponse: AgentResponse = match
+        ? { ...raw.response, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
+        : raw.response;
+      this.state.movementOutputs.set(step.name, finalResponse);
+      this.state.lastOutput = finalResponse;
+      result = { response: finalResponse, instruction: raw.instruction };
+    } else if (step.parallel && step.parallel.length > 0) {
       result = await this.parallelRunner.runParallelMovement(
         step, this.state, this.task, this.config.maxMovements, updateSession,
       );
@@ -630,7 +665,7 @@ export class PieceEngine extends EventEmitter {
 
       // Build instruction before emitting movement:start so listeners can log it.
       // Parallel/arpeggio/team_leader movements handle iteration incrementing internally.
-      const isDelegated = (movement.parallel && movement.parallel.length > 0) || !!movement.arpeggio || !!movement.teamLeader;
+      const isDelegated = movement.kind === 'piece_call' || (movement.parallel && movement.parallel.length > 0) || !!movement.arpeggio || !!movement.teamLeader;
       let prebuiltInstruction: string | undefined;
       if (!isDelegated) {
         const movementIteration = incrementMovementIteration(this.state, movement.name);

@@ -8,6 +8,7 @@ import { AggregateEvaluator } from './AggregateEvaluator.js';
 
 export { RuleEvaluator, type RuleMatch, type RuleEvaluatorContext } from './RuleEvaluator.js';
 export { AggregateEvaluator } from './AggregateEvaluator.js';
+export { resolveMatchFromResponse } from './resolve-match.js';
 
 // ---- Function facades for consumers that prefer the function API ----
 

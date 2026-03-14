@@ -279,8 +279,35 @@ function normalizeStepFromRaw(
     ? resolveRefToContent(step.instruction_template, sections.resolvedInstructions, pieceDir, 'instructions', context)
     : undefined;
 
+  // piece_call kind/call normalization
+  const rawKind = (step as Record<string, unknown>).kind as string | undefined;
+  const rawCall = (step as Record<string, unknown>).call as string | undefined;
+  const rawOverrides = (step as Record<string, unknown>).overrides as Record<string, unknown> | undefined;
+
+  let normalizedKind: PieceMovement['kind'];
+  let normalizedCall: string | undefined;
+  let normalizedOverrides: PieceMovement['overrides'];
+
+  if (rawKind === 'piece_call' || (rawCall != null && rawKind !== 'agent')) {
+    normalizedKind = 'piece_call';
+    normalizedCall = rawCall;
+  } else if (rawKind === 'agent') {
+    normalizedKind = 'agent';
+  }
+
+  if (rawOverrides) {
+    normalizedOverrides = {
+      provider: rawOverrides.provider as PieceMovement['provider'],
+      model: rawOverrides.model as string | undefined,
+      providerOptions: rawOverrides.provider_options as PieceMovement['providerOptions'],
+    };
+  }
+
   const result: PieceMovement = {
     name: step.name,
+    ...(normalizedKind != null && { kind: normalizedKind }),
+    ...(normalizedCall != null && { call: normalizedCall }),
+    ...(normalizedOverrides != null && { overrides: normalizedOverrides }),
     description: step.description,
     persona: personaSpec,
     session: step.session,
@@ -292,7 +319,7 @@ function normalizeStepFromRaw(
     requiredPermissionMode: step.required_permission_mode,
     providerOptions: mergeProviderOptions(inheritedProviderOptions, normalizedProvider.providerOptions),
     edit: step.edit,
-    instruction: expandedInstruction || expandedLegacyInstruction || '{task}',
+    instruction: normalizedKind === 'piece_call' ? '' : (expandedInstruction || expandedLegacyInstruction || '{task}'),
     rules,
     outputContracts: normalizeOutputContracts(step.output_contracts, pieceDir, sections.resolvedReportFormats, context),
     qualityGates: applyQualityGateOverrides(
@@ -435,6 +462,7 @@ export function normalizePieceConfig(
     loopMonitors: normalizeLoopMonitors(parsed.loop_monitors, pieceDir, sections, context),
     answerAgent: parsed.answer_agent,
     interactiveMode: parsed.interactive_mode,
+    ...(parsed.subpiece != null && { subpiece: parsed.subpiece }),
   };
 }
 

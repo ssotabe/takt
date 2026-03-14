@@ -14,6 +14,7 @@ import { executeAgent } from '../../../agents/agent-usecases.js';
 import { ParallelLogger } from './parallel-logger.js';
 import { needsStatusJudgmentPhase, runReportPhase, runStatusJudgmentPhase } from '../phase-runner.js';
 import { detectMatchedRule } from '../evaluation/index.js';
+import { resolveMatchFromResponse } from '../evaluation/resolve-match.js';
 import type { StatusJudgmentPhaseResult } from '../phase-runner.js';
 import { incrementMovementIteration } from './state-manager.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
@@ -22,15 +23,26 @@ import type { OptionsBuilder } from './OptionsBuilder.js';
 import type { MovementExecutor } from './MovementExecutor.js';
 import type { PieceEngineOptions, PhaseName, PhasePromptParts, JudgeStageEntry } from '../types.js';
 import type { ParallelLoggerOptions } from './parallel-logger.js';
+import type { PieceCallRunner } from './PieceCallRunner.js';
+import { cleanupParallelWorktree } from './parallel-worktree.js';
+import { prepareSlotContext } from './slot-context.js';
 
 const log = createLogger('parallel-runner');
+
+interface SubMovementResult {
+  subMovement: PieceMovement;
+  response: AgentResponse;
+  instruction: string;
+}
 
 export interface ParallelRunnerDeps {
   readonly optionsBuilder: OptionsBuilder;
   readonly movementExecutor: MovementExecutor;
   readonly engineOptions: PieceEngineOptions;
+  readonly pieceCallRunner?: PieceCallRunner;
   readonly getCwd: () => string;
-  readonly getReportDir: () => string;
+  readonly getProjectCwd: () => string;
+  readonly getReportDirSlug: () => string;
   readonly getInteractive: () => boolean;
   readonly detectRuleIndex: (content: string, movementName: string) => number;
   readonly callAiJudge: (
@@ -107,9 +119,41 @@ export class ParallelRunner {
       callAiJudge: this.deps.callAiJudge,
     };
 
+    const slotContext = prepareSlotContext(
+      subMovements, state, this.deps.getReportDirSlug(), this.deps.getProjectCwd(),
+    );
+
     // Run all sub-movements concurrently (failures are captured, not thrown)
     const settled = await Promise.allSettled(
       subMovements.map(async (subMovement, index) => {
+        // piece_call sub-movement: delegate to PieceCallRunner
+        if (subMovement.kind === 'piece_call' && this.deps.pieceCallRunner) {
+          incrementMovementIteration(state, subMovement.name);
+          const slotOverrides = slotContext?.overrides.get(subMovement.name);
+          const worktreeInfo = slotContext?.worktrees.get(subMovement.name);
+          let shouldMerge = false;
+          try {
+            const { response, instruction: subInstruction } = await this.deps.pieceCallRunner.runPieceCallMovement(
+              subMovement, state, task, maxMovements, slotOverrides,
+            );
+
+            const match = await resolveMatchFromResponse(subMovement, response, ruleCtx);
+            const matchedCondition = match ? subMovement.rules?.[match.index]?.condition : undefined;
+            shouldMerge = matchedCondition !== 'ABORT';
+
+            const finalResponse: AgentResponse = match
+              ? { ...response, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
+              : response;
+
+            state.movementOutputs.set(subMovement.name, finalResponse);
+            return { subMovement, response: finalResponse, instruction: subInstruction };
+          } finally {
+            if (worktreeInfo) {
+              cleanupParallelWorktree(worktreeInfo.path, this.deps.getProjectCwd(), shouldMerge);
+            }
+          }
+        }
+
         const subIteration = incrementMovementIteration(state, subMovement.name);
         const subInstruction = this.deps.movementExecutor.buildInstruction(subMovement, subIteration, state, task, maxMovements);
         const parentIteration = state.iteration;
@@ -184,7 +228,27 @@ export class ParallelRunner {
       }),
     );
 
-    // Map settled results: fulfilled → as-is, rejected → error AgentResponse
+    const subResults = this.mapSettledResults(settled, subMovements, state);
+
+    // Print completion summary
+    if (parallelLogger) {
+      parallelLogger.printSummary(
+        step.name,
+        subResults.map((r) => ({
+          name: r.subMovement.name,
+          condition: this.getMatchedCondition(r.response, r.subMovement),
+        })),
+      );
+    }
+
+    return this.buildAggregatedResponse(step, subResults, state, movementIteration, ruleCtx);
+  }
+
+  private mapSettledResults(
+    settled: PromiseSettledResult<SubMovementResult>[],
+    subMovements: readonly PieceMovement[],
+    state: PieceState,
+  ): SubMovementResult[] {
     const subResults = settled.map((result, index) => {
       if (result.status === 'fulfilled') {
         return result.value;
@@ -203,28 +267,31 @@ export class ParallelRunner {
       return { subMovement: failedMovement, response: errorResponse, instruction: '' };
     });
 
-    // If all sub-movements failed (error-originated), throw
     const allFailed = subResults.every(r => r.response.error != null);
     if (allFailed) {
       const errors = subResults.map(r => `${r.subMovement.name}: ${r.response.error}`).join('; ');
       throw new Error(`All parallel sub-movements failed: ${errors}`);
     }
 
-    // Print completion summary
-    if (parallelLogger) {
-      parallelLogger.printSummary(
-        step.name,
-        subResults.map((r) => ({
-          name: r.subMovement.name,
-          condition: r.response.matchedRuleIndex != null && r.subMovement.rules
-            ? r.subMovement.rules[r.response.matchedRuleIndex]?.condition
-            : undefined,
-        })),
-      );
-    }
+    return subResults;
+  }
 
-    // Aggregate sub-movement outputs into parent movement's response
-    const aggregatedContent = subResults
+  private async buildAggregatedResponse(
+    step: PieceMovement,
+    subResults: SubMovementResult[],
+    state: PieceState,
+    movementIteration: number,
+    ruleCtx: { state: PieceState; cwd: string; interactive: boolean; detectRuleIndex: ParallelRunnerDeps['detectRuleIndex']; callAiJudge: ParallelRunnerDeps['callAiJudge'] },
+  ): Promise<{ response: AgentResponse; instruction: string }> {
+    const slotResultsSummary = subResults
+      .map((r) => {
+        const condition = this.getMatchedCondition(r.response, r.subMovement)
+          ?? (r.response.error ? 'ERROR' : 'UNKNOWN');
+        return `- ${r.subMovement.name}: ${condition}`;
+      })
+      .join('\n');
+
+    const aggregatedContent = `## Slot Results\n${slotResultsSummary}\n\n---\n\n` + subResults
       .map((r) => `## ${r.subMovement.name}\n${r.response.content}`)
       .join('\n\n---\n\n');
 
@@ -232,7 +299,6 @@ export class ParallelRunner {
       .map((r) => r.instruction)
       .join('\n\n');
 
-    // Parent movement uses aggregate conditions, so tagContent is empty
     const match = await detectMatchedRule(step, aggregatedContent, '', ruleCtx);
 
     const aggregatedResponse: AgentResponse = {
@@ -253,6 +319,11 @@ export class ParallelRunner {
     );
     this.deps.movementExecutor.emitMovementReports(step);
     return { response: aggregatedResponse, instruction: aggregatedInstruction };
+  }
+
+  private getMatchedCondition(response: AgentResponse, movement: PieceMovement): string | undefined {
+    if (response.matchedRuleIndex == null || !movement.rules) return undefined;
+    return movement.rules[response.matchedRuleIndex]?.condition;
   }
 
   private buildParallelLoggerOptions(

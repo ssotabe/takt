@@ -25,6 +25,7 @@ export type {
   LoopMonitorConfig,
   LoopMonitorJudge,
   LoopMonitorRule,
+  PieceCallOverrides,
   PieceConfig,
   PieceState,
   CustomAgentConfig,

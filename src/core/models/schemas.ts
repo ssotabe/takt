@@ -286,9 +286,52 @@ export const TeamLeaderConfigRawSchema = z.object({
   },
 );
 
+/**
+ * Shared piece_call constraint validation for both top-level and parallel sub-movement schemas.
+ * `extraForbiddenKeys` allows top-level schema to also forbid parallel/arpeggio/team_leader.
+ */
+function validatePieceCallConstraints(
+  data: { kind?: string; call?: string; persona?: string; instruction?: string; instruction_template?: string; edit?: boolean; overrides?: unknown; [key: string]: unknown },
+  ctx: z.core.$RefinementCtx,
+  extraForbiddenKeys?: string[],
+): void {
+  const isPieceCall = data.kind === 'piece_call' || (data.call != null && data.kind !== 'agent');
+  if (data.kind === 'piece_call' && !data.call) {
+    ctx.addIssue({ code: 'custom', message: "'kind: piece_call' requires 'call' field", path: ['call'] });
+  }
+  if (data.kind === 'agent' && data.call != null) {
+    ctx.addIssue({ code: 'custom', message: "'kind: agent' cannot have 'call' field", path: ['call'] });
+  }
+  if (isPieceCall) {
+    if (data.persona != null) ctx.addIssue({ code: 'custom', message: "'piece_call' cannot have 'persona'", path: ['persona'] });
+    if (data.instruction != null) ctx.addIssue({ code: 'custom', message: "'piece_call' cannot have 'instruction'", path: ['instruction'] });
+    if (data.instruction_template != null) ctx.addIssue({ code: 'custom', message: "'piece_call' cannot have 'instruction_template'", path: ['instruction_template'] });
+    if (data.edit != null) ctx.addIssue({ code: 'custom', message: "'piece_call' cannot have 'edit'", path: ['edit'] });
+    for (const key of extraForbiddenKeys ?? []) {
+      if (data[key] != null) ctx.addIssue({ code: 'custom', message: `'piece_call' cannot have '${key}'`, path: [key] });
+    }
+  }
+  if (data.overrides != null && data.kind === 'agent') {
+    ctx.addIssue({ code: 'custom', message: "'overrides' is only allowed on piece_call movements", path: ['overrides'] });
+  }
+}
+
+/** Overrides schema for piece_call movements (provider/model/provider_options) */
+export const PieceCallOverridesRawSchema = z.object({
+  provider: ProviderTypeSchema.optional(),
+  model: z.string().optional(),
+  provider_options: MovementProviderOptionsSchema,
+}).optional();
+
 /** Sub-movement schema for parallel execution */
 export const ParallelSubMovementRawSchema = z.object({
   name: z.string().min(1),
+  /** Movement kind: 'agent' (default) or 'piece_call' */
+  kind: z.enum(['agent', 'piece_call']).optional(),
+  /** Child piece identifier for piece_call movements */
+  call: z.string().min(1).optional(),
+  /** Provider/model overrides for piece_call child piece */
+  overrides: PieceCallOverridesRawSchema,
   /** Persona reference — key name from piece-level personas map, or file path */
   persona: z.string().optional(),
   /** Display name for the persona (shown in output) */
@@ -314,11 +357,19 @@ export const ParallelSubMovementRawSchema = z.object({
   /** Quality gates for this movement (AI directives) */
   quality_gates: QualityGatesSchema,
   pass_previous_response: z.boolean().optional().default(true),
+}).superRefine((data, ctx) => {
+  validatePieceCallConstraints(data, ctx);
 });
 
 /** Piece movement schema - raw YAML format */
 export const PieceMovementRawSchema = z.object({
   name: z.string().min(1),
+  /** Movement kind: 'agent' (default) or 'piece_call' */
+  kind: z.enum(['agent', 'piece_call']).optional(),
+  /** Child piece identifier for piece_call movements */
+  call: z.string().min(1).optional(),
+  /** Provider/model overrides for piece_call child piece */
+  overrides: PieceCallOverridesRawSchema,
   description: z.string().optional(),
   /** Session handling for this movement */
   session: z.enum(['continue', 'refresh']).optional(),
@@ -363,7 +414,9 @@ export const PieceMovementRawSchema = z.object({
     message: "'parallel', 'arpeggio', and 'team_leader' are mutually exclusive",
     path: ['parallel'],
   },
-);
+).superRefine((data, ctx) => {
+  validatePieceCallConstraints(data, ctx, ['parallel', 'arpeggio', 'team_leader']);
+});
 
 /** Loop monitor rule schema */
 export const LoopMonitorRuleSchema = z.object({
@@ -422,6 +475,8 @@ export const PieceConfigRawSchema = z.object({
   answer_agent: z.string().optional(),
   /** Default interactive mode for this piece (overrides user default) */
   interactive_mode: InteractiveModeSchema.optional(),
+  /** Sub-piece configuration (marks this piece as callable from piece_call) */
+  subpiece: z.object({ callable: z.boolean() }).optional(),
 });
 
 export const PersonaProviderEntrySchema = z.object({

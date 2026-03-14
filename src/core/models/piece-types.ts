@@ -118,9 +118,22 @@ export interface MovementProviderOptions {
   claude?: ClaudeProviderOptions;
 }
 
+/** Overrides for child piece provider/model in piece_call movements */
+export interface PieceCallOverrides {
+  provider?: PieceMovement['provider'];
+  model?: string;
+  providerOptions?: MovementProviderOptions;
+}
+
 /** Single movement in a piece */
 export interface PieceMovement {
   name: string;
+  /** Movement kind: 'agent' (default) or 'piece_call' (sub-piece invocation) */
+  kind?: 'agent' | 'piece_call';
+  /** Identifier of the child piece to call (required when kind is 'piece_call') */
+  call?: string;
+  /** Provider/model overrides for the child piece (only for piece_call) */
+  overrides?: PieceCallOverrides;
   /** Brief description of this movement's role in the piece */
   description?: string;
   /** Resolved persona spec (file path or inline prompt). Set from persona field in YAML. */
@@ -268,6 +281,8 @@ export interface PieceConfig {
   answerAgent?: string;
   /** Default interactive mode for this piece (overrides user default) */
   interactiveMode?: InteractiveMode;
+  /** Sub-piece configuration (marks this piece as callable from piece_call) */
+  subpiece?: { callable: boolean };
 }
 
 /** Runtime state of a piece execution */

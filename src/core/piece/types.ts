@@ -6,7 +6,7 @@
  */
 
 import type { PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
-import type { PieceMovement, AgentResponse, PieceState, Language, LoopMonitorConfig } from '../models/types.js';
+import type { PieceMovement, AgentResponse, PieceState, PieceConfig, Language, LoopMonitorConfig } from '../models/types.js';
 import type { PersonaProviderEntry } from '../models/config-types.js';
 import type { ProviderPermissionProfiles } from '../models/provider-profiles.js';
 import type { MovementProviderOptions } from '../models/piece-types.js';
@@ -220,6 +220,22 @@ export interface PieceEngineOptions {
   taskColorIndex?: number;
   /** Initial iteration count (for resuming exceeded tasks) */
   initialIteration?: number;
+  /** Call stack for piece_call circular detection (list of ancestor piece names) */
+  callStack?: string[];
+  /** Current nesting depth for piece_call depth limit enforcement */
+  nestingDepth?: number;
+  /** Resolver function for loading child pieces by identifier (injected from infra layer) */
+  loadPieceByIdentifier?: (identifier: string, projectCwd: string) => PieceConfig | null;
+  /** Initial previous response for child engines (propagated from parent piece_call) */
+  initialPreviousResponse?: AgentResponse;
+  /** Setup session logging for child engines created by piece_call */
+  setupChildSessionLogging?: (
+    childEngine: NodeJS.EventEmitter,
+    childCwd: string,
+    task: string,
+    reportDirName: string,
+    pieceName: string,
+  ) => void;
 }
 
 /** Loop detection result */

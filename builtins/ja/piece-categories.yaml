@@ -61,5 +61,6 @@ piece_categories:
       - research
       - deep-research
       - magi
+      - roadmap
 show_others_category: true
 others_category_name: その他

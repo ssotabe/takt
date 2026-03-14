@@ -28,6 +28,8 @@ import { RunMetaManager } from './runMeta.js';
 import { createIterationLimitHandler, createUserInputHandler } from './iterationLimitHandler.js';
 import { assertTaskPrefixPair, truncate, formatElapsedTime, detectMovementType } from './pieceExecutionUtils.js';
 import { createTraceReportWriter } from './traceReportWriter.js';
+import { connectEngineToSessionLogger, createChildSessionLoggingSetup } from './engineSessionBridge.js';
+import { loadPieceByIdentifier } from '../../../infra/config/loaders/pieceResolver.js';
 import { sanitizeTextForStorage } from './traceReportRedaction.js';
 export type { PieceExecutionResult, PieceExecutionOptions };
 const log = createLogger('piece');
@@ -38,8 +40,7 @@ export async function executePiece(
   cwd: string,
   options: PieceExecutionOptions,
 ): Promise<PieceExecutionResult> {
-  const { headerPrefix = 'Running Piece:', interactiveUserInput = false } = options;
-  const projectCwd = options.projectCwd;
+  const { headerPrefix = 'Running Piece:', interactiveUserInput = false, projectCwd } = options;
   assertTaskPrefixPair(options.taskPrefix, options.taskColorIndex);
   const prefixWriter = options.taskPrefix != null
     ? new TaskPrefixWriter({ taskName: options.taskPrefix, colorIndex: options.taskColorIndex!, displayLabel: options.taskDisplayLabel })
@@ -126,10 +127,8 @@ export async function executePiece(
     },
   );
   const onUserInput = interactiveUserInput ? createUserInputHandler(out, displayRef) : undefined;
-  let abortReason: string | undefined;
-  let exceededInfo: ExceededInfo | undefined;
-  let lastMovementContent: string | undefined;
-  let lastMovementName: string | undefined;
+  let abortReason: string | undefined, exceededInfo: ExceededInfo | undefined;
+  let lastMovementContent: string | undefined, lastMovementName: string | undefined;
   const writeTraceReportOnce = createTraceReportWriter({
     sessionLogger,
     ndjsonLogPath,
@@ -141,7 +140,6 @@ export async function executePiece(
     mode: traceReportMode,
     logger: log,
   });
-  let currentIteration = 0;
   const movementIterations = new Map<string, number>();
   let engine: PieceEngine | null = null;
   const runAbortController = new AbortController();
@@ -172,23 +170,19 @@ export async function executePiece(
       taskPrefix: options.taskPrefix,
       taskColorIndex: options.taskColorIndex,
       initialIteration: options.initialIterationOverride,
+      loadPieceByIdentifier,
+      setupChildSessionLogging: createChildSessionLoggingSetup({ traceReportMode }),
     });
     abortHandler.install();
-    engine.on('phase:start', (step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration) => {
+    connectEngineToSessionLogger(engine, sessionLogger);
+    engine.on('phase:start', (step, phase, phaseName) => {
       log.debug('Phase starting', { step: step.name, phase, phaseName });
-      sessionLogger.onPhaseStart(step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration);
     });
-    engine.on('phase:complete', (step, phase, phaseName, content, phaseStatus, phaseError, phaseExecutionId, iteration) => {
+    engine.on('phase:complete', (step, phase, phaseName, _content, phaseStatus) => {
       log.debug('Phase completed', { step: step.name, phase, phaseName, status: phaseStatus });
-      sessionLogger.setIteration(currentIteration);
-      sessionLogger.onPhaseComplete(step, phase, phaseName, content, phaseStatus, phaseError, phaseExecutionId, iteration);
-    });
-    engine.on('phase:judge_stage', (step, phase, phaseName, entry, phaseExecutionId, iteration) => {
-      sessionLogger.onJudgeStage(step, phase, phaseName, entry, phaseExecutionId, iteration);
     });
     engine.on('movement:start', (step, iteration, instruction, providerInfo) => {
       log.debug('Movement starting', { step: step.name, persona: step.personaDisplayName, iteration });
-      currentIteration = iteration;
       const movementIteration = (movementIterations.get(step.name) ?? 0) + 1;
       movementIterations.set(step.name, movementIteration);
       prefixWriter?.setMovementContext({ movementName: step.name, iteration, maxMovements: effectivePieceConfig.maxMovements, movementIteration });
@@ -212,7 +206,6 @@ export async function executePiece(
           totalMovements: pieceConfig.movements.length,
         });
       }
-      sessionLogger.onMovementStart(step, iteration, instruction);
     });
     engine.on('movement:complete', (step, response, instruction) => {
       log.debug('Movement completed', { step: step.name, status: response.status, matchedRuleIndex: response.matchedRuleIndex, matchedRuleMethod: response.matchedRuleMethod, contentLength: response.content.length, sessionId: response.sessionId, error: response.error });
@@ -231,7 +224,6 @@ export async function executePiece(
       if (response.error) out.error(`Error: ${response.error}`);
       if (response.sessionId) out.status('Session', response.sessionId);
       usageEventLogger.logUsage({ success: response.status === 'done', usage: response.providerUsage ?? { usageMissing: true, reason: USAGE_MISSING_REASONS.NOT_AVAILABLE } });
-      sessionLogger.onMovementComplete(step, response, instruction);
       analyticsEmitter.onMovementComplete(step, response);
       sessionLog = { ...sessionLog, iterations: sessionLog.iterations + 1 };
     });

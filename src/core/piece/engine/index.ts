@@ -10,6 +10,7 @@ export type { MovementExecutorDeps } from './MovementExecutor.js';
 export { ParallelRunner } from './ParallelRunner.js';
 export { ArpeggioRunner } from './ArpeggioRunner.js';
 export { TeamLeaderRunner } from './TeamLeaderRunner.js';
+export { PieceCallRunner } from './PieceCallRunner.js';
 export { OptionsBuilder } from './OptionsBuilder.js';
 export { CycleDetector } from './cycle-detector.js';
 export type { CycleCheckResult } from './cycle-detector.js';

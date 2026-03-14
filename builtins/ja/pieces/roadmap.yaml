@@ -1,0 +1,93 @@
+name: roadmap
+description: ロードマップ実行ピース（タスク分解 → 2並列piece_call → バッチループ）
+max_movements: 200
+initial_movement: decompose
+movements:
+  - name: decompose
+    persona: planner
+    edit: false
+    instruction: |
+      ユーザーのロードマップ（{task}）を分析し、独立実行可能なタスクに分解してください。
+
+      **手順:**
+      1. {report:roadmap-tasks.md} が存在する場合は Read ツールで読み、既完了タスクとリトライ回数を把握する
+      2. previous_response に `## Slot Results` セクションが含まれている場合（失敗スロットのリトライフロー）:
+         - 失敗（ABORT/ERROR）したスロットのタスクを特定する
+         - 該当タスクを slot_1 / slot_2 に再割り当てする
+         - roadmap-tasks.md の該当タスクのリトライ回数をインクリメントする
+      3. 通常フロー: ロードマップから独立実行可能なタスクを洗い出す
+      4. 未完了タスクから最大2件を選び、slot_1 / slot_2 に割り当てる
+      5. 2件未満の場合、不要なスロットには「タスクなし」と明記する
+
+      **出力形式:**
+      各スロットのタスク指示は、子ピースが単独で実行できるだけの十分な情報を含めてください:
+      - 背景・目的
+      - 実装内容の詳細
+      - 制約・注意事項
+      - 確認方法
+
+      ## slot_1
+      （タスク指示）
+
+      ## slot_2
+      （タスク指示 or タスクなし）
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: 分解完了
+        next: execute_batch
+      - condition: タスクなし
+        next: COMPLETE
+      - condition: 要件不明
+        next: ABORT
+  - name: execute_batch
+    parallel:
+      - name: slot_1
+        kind: piece_call
+        call: takt-default
+        rules:
+          - condition: COMPLETE
+          - condition: ABORT
+      - name: slot_2
+        kind: piece_call
+        call: takt-default
+        rules:
+          - condition: COMPLETE
+          - condition: ABORT
+    rules:
+      - condition: all("COMPLETE")
+        next: check_remaining
+      - condition: any("ABORT")
+        next: check_remaining
+  - name: check_remaining
+    persona: planner
+    edit: false
+    instruction: |
+      前バッチの実行結果を確認し、失敗スロットの有無と残りタスクの有無を判定してください。
+
+      **手順:**
+      1. {report:roadmap-tasks.md} を Read ツールで読み、全タスクリストとリトライ回数を確認する
+      2. previous_response の `## Slot Results` セクションから各スロットの成否を確認する
+         - COMPLETE: 成功（処理済み）
+         - ABORT / ERROR: 失敗（リトライ対象）
+      3. 失敗スロットがある場合、roadmap-tasks.md の該当タスクのリトライ回数を確認する
+         - リトライ回数が上限（2回）未満 → 「失敗スロットあり」と判定
+         - 全失敗スロットのリトライ回数が上限（2回）に到達 → 「リトライ上限到達」と判定
+      4. 失敗スロットがなく、未実行の残りタスクがあれば「残りタスクあり」と判定する
+      5. 全タスク完了（成功済み + 残りタスクなし）であれば「全タスク完了」と判定する
+      6. roadmap-tasks.md にリトライ回数を更新して書き出す
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: 失敗スロットあり
+        next: decompose
+      - condition: 残りタスクあり
+        next: decompose
+      - condition: 全タスク完了
+        next: COMPLETE
+      - condition: リトライ上限到達
+        next: COMPLETE

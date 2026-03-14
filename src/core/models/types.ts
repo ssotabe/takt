@@ -48,6 +48,7 @@ export type {
   LoopMonitorConfig,
   LoopMonitorJudge,
   LoopMonitorRule,
+  PieceCallOverrides,
   PieceConfig,
   PieceState,
 } from './piece-types.js';

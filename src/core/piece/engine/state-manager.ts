@@ -39,7 +39,7 @@ export class StateManager {
       currentMovement: options.startMovement ?? config.initialMovement,
       iteration: options.initialIteration ?? 0,
       movementOutputs: new Map(),
-      lastOutput: undefined,
+      lastOutput: options.initialPreviousResponse,
       previousResponseSourcePath: undefined,
       userInputs,
       personaSessions,
