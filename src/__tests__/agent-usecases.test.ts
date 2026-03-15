@@ -305,7 +305,7 @@ describe('agent-usecases', () => {
     });
 
     await expect(decomposeTask('instruction', 2, { cwd: '/repo' }))
-      .rejects.toThrow('Team leader failed: bad output');
+      .rejects.toThrow('Team leader failed: status=error, error=bad output, content=failure');
   });
 
   it('decomposeTask は onPromptResolved を runAgent に伝搬する', async () => {
@@ -372,6 +372,6 @@ describe('agent-usecases', () => {
       ['p1'],
       1,
       { cwd: '/repo', persona: 'team-leader' },
-    )).rejects.toThrow('Team leader feedback failed: timeout');
+    )).rejects.toThrow('Team leader feedback failed: status=error, error=timeout, content=feedback failed');
   });
 });

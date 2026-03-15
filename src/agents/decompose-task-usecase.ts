@@ -1,4 +1,5 @@
 import type { Language, PartDefinition } from '../core/models/types.js';
+import type { AgentResponse } from '../core/models/response.js';
 import { runAgent, type StreamCallback } from './runner.js';
 import { parseParts } from '../core/piece/engine/task-decomposer.js';
 import { loadDecompositionSchema, loadMorePartsSchema } from '../infra/resources/schema-loader.js';
@@ -68,6 +69,14 @@ function toMorePartsResponse(raw: unknown, maxAdditionalParts: number): MorePart
     reasoning: payload.reasoning,
     parts,
   };
+}
+
+function formatResponseErrorDetail(response: AgentResponse): string {
+  return [
+    `status=${response.status}`,
+    response.error ? `error=${response.error}` : null,
+    response.content ? `content=${response.content}` : null,
+  ].filter(Boolean).join(', ');
 }
 
 function summarizePartContent(content: string): string {
@@ -173,8 +182,7 @@ export async function decomposeTask(
   });
 
   if (response.status !== 'done') {
-    const detail = response.error || response.content || response.status;
-    throw new Error(`Team leader failed: ${detail}`);
+    throw new Error(`Team leader failed: ${formatResponseErrorDetail(response)}`);
   }
 
   const parts = response.structuredOutput?.parts;
@@ -214,8 +222,7 @@ export async function requestMoreParts(
   });
 
   if (response.status !== 'done') {
-    const detail = response.error || response.content || response.status;
-    throw new Error(`Team leader feedback failed: ${detail}`);
+    throw new Error(`Team leader feedback failed: ${formatResponseErrorDetail(response)}`);
   }
 
   return toMorePartsResponse(response.structuredOutput, maxAdditionalParts);

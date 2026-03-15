@@ -209,11 +209,28 @@ export class TeamLeaderRunner {
         teamLeaderConfig.timeoutMs,
         updatePersonaSession,
         parallelLogger,
-      ).catch((error) => this.buildErrorPartResult(step, part, error)),
+      ).catch((error) => {
+        log.error(`Part "${part.id}" failed`, {
+          partId: part.id,
+          movement: step.name,
+          error: getErrorMessage(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        return this.buildErrorPartResult(step, part, error);
+      }),
     });
 
     const allFailed = partResults.every((result) => result.response.status === 'error');
     if (allFailed) {
+      const errorDetails = partResults.map((result) => ({
+        partId: result.part.id,
+        error: resolvePartErrorDetail(result),
+      }));
+      log.error('All team leader parts failed', {
+        movement: step.name,
+        partCount: partResults.length,
+        errors: errorDetails,
+      });
       const errors = partResults.map((result) => `${result.part.id}: ${resolvePartErrorDetail(result)}`).join('; ');
       throw new Error(`All team leader parts failed: ${errors}`);
     }
