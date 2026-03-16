@@ -20,7 +20,7 @@ export function parseSlotSections(
   const missingSlots: string[] = [];
 
   for (const name of slotNames) {
-    const pattern = new RegExp(`^## ${escapeRegExp(name)}$`, 'm');
+    const pattern = new RegExp(`^## ${escapeRegExp(name)}\\b`, 'm');
     const match = pattern.exec(content);
     if (!match) {
       missingSlots.push(name);

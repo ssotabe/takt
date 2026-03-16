@@ -350,4 +350,81 @@ describe('parseSlotSections', () => {
       expect(() => parseSlotSections(content, slotNames)).toThrow();
     });
   });
+
+  // =====================================================
+  // 9. Header matching with suffixes (word boundary)
+  // =====================================================
+  describe('header matching with suffixes', () => {
+    it('should match header without suffix', () => {
+      // Given: standard header with no suffix
+      const content = [
+        '## slot_1',
+        'Task 1 instructions.',
+        '',
+        '## slot_2',
+        'Task 2 instructions.',
+      ].join('\n');
+      const slotNames = ['slot_1', 'slot_2'];
+
+      // When
+      const result = parseSlotSections(content, slotNames);
+
+      // Then: both slots are parsed
+      expect(result.get('slot_1')).toBe('Task 1 instructions.');
+      expect(result.get('slot_2')).toBe('Task 2 instructions.');
+    });
+
+    it('should match header with colon suffix', () => {
+      // Given: LLM output with colon + text after slot name
+      const content = [
+        '## slot_1: 認証モジュール実装',
+        'Implement user authentication.',
+        '',
+        '## slot_2: DB移行',
+        'Add database migration.',
+      ].join('\n');
+      const slotNames = ['slot_1', 'slot_2'];
+
+      // When
+      const result = parseSlotSections(content, slotNames);
+
+      // Then: slots are parsed despite colon suffix
+      expect(result.get('slot_1')).toContain('Implement user authentication.');
+      expect(result.get('slot_2')).toContain('Add database migration.');
+    });
+
+    it('should match header with space suffix', () => {
+      // Given: LLM output with space + text after slot name
+      const content = [
+        '## slot_1 タスク名',
+        'Task 1 body.',
+        '',
+        '## slot_2 別タスク',
+        'Task 2 body.',
+      ].join('\n');
+      const slotNames = ['slot_1', 'slot_2'];
+
+      // When
+      const result = parseSlotSections(content, slotNames);
+
+      // Then: slots are parsed despite space suffix
+      expect(result.get('slot_1')).toContain('Task 1 body.');
+      expect(result.get('slot_2')).toContain('Task 2 body.');
+    });
+
+    it('should not match slot_10 when searching for slot_1', () => {
+      // Given: slot_10 header exists but we search for slot_1
+      const content = [
+        '## slot_10',
+        'This is slot 10 content.',
+        '',
+        '## slot_2',
+        'This is slot 2 content.',
+      ].join('\n');
+      const slotNames = ['slot_1', 'slot_2'];
+
+      // When/Then: should throw because slot_1 is missing (slot_10 must not match)
+      expect(() => parseSlotSections(content, slotNames)).toThrow(/slot_1/);
+    });
+  });
 });
