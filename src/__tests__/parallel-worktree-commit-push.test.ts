@@ -186,6 +186,76 @@ describe('cleanupParallelWorktree with merge', () => {
       );
     });
 
+    it('should use slotInstruction first line as commit message when provided', async () => {
+      // Given: merge succeeds, slotInstruction provided
+      mockSuccessfulMergeFlow();
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      // When
+      await cleanupParallelWorktree(worktreePath, parentCwd, true, 'Implement feature X');
+
+      // Then: commit message should include slotInstruction first line
+      expect(stageAndCommit).toHaveBeenCalledWith(
+        worktreePath,
+        'takt: Implement feature X',
+        { allowGitHooks: false, allowGitFilters: false },
+      );
+    });
+
+    it('should use only the first line of multi-line slotInstruction', async () => {
+      // Given: merge succeeds, multi-line slotInstruction
+      mockSuccessfulMergeFlow();
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      // When
+      await cleanupParallelWorktree(
+        worktreePath,
+        parentCwd,
+        true,
+        'First line summary\nSecond line detail\nThird line more detail',
+      );
+
+      // Then: only the first line should be used
+      expect(stageAndCommit).toHaveBeenCalledWith(
+        worktreePath,
+        'takt: First line summary',
+        { allowGitHooks: false, allowGitFilters: false },
+      );
+    });
+
+    it('should truncate slotInstruction first line to 72 characters', async () => {
+      // Given: merge succeeds, slotInstruction first line exceeds 72 chars
+      mockSuccessfulMergeFlow();
+      vi.mocked(existsSync).mockReturnValue(true);
+      const longLine = 'A'.repeat(100);
+
+      // When
+      await cleanupParallelWorktree(worktreePath, parentCwd, true, longLine);
+
+      // Then: commit message should be truncated to 72 chars
+      expect(stageAndCommit).toHaveBeenCalledWith(
+        worktreePath,
+        `takt: ${'A'.repeat(72)}`,
+        { allowGitHooks: false, allowGitFilters: false },
+      );
+    });
+
+    it('should fall back to default message when slotInstruction is empty string', async () => {
+      // Given: merge succeeds, slotInstruction is empty
+      mockSuccessfulMergeFlow();
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      // When
+      await cleanupParallelWorktree(worktreePath, parentCwd, true, '');
+
+      // Then: should use fallback message
+      expect(stageAndCommit).toHaveBeenCalledWith(
+        worktreePath,
+        'takt: auto-commit before merge',
+        { allowGitHooks: false, allowGitFilters: false },
+      );
+    });
+
     it('should not call stageAndCommit when shouldMerge=false', async () => {
       // Given
       vi.mocked(existsSync).mockReturnValue(true);

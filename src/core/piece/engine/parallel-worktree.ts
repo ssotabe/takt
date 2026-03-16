@@ -125,7 +125,10 @@ export async function cleanupParallelWorktree(
 ): Promise<void> {
   if (shouldMerge) {
     try {
-      const hash = stageAndCommit(worktreePath, 'takt: auto-commit before merge', {
+      const summary = slotInstruction
+        ? slotInstruction.split('\n')[0]!.slice(0, 72)
+        : 'auto-commit before merge';
+      const hash = stageAndCommit(worktreePath, `takt: ${summary}`, {
         allowGitHooks: false,
         allowGitFilters: false,
       });
