@@ -47,6 +47,7 @@ describe('autoCommitAndPush', () => {
 
     expect(result.success).toBe(true);
     expect(result.commitHash).toBe('abc1234');
+    expect(result.pushed).toBe(true);
     expect(result.message).toContain('abc1234');
 
     const addCall = mockExecFileSync.mock.calls.find(
@@ -87,7 +88,7 @@ describe('autoCommitAndPush', () => {
     );
   });
 
-  it('should return success with no commit when there are no changes', () => {
+  it('should push and return pushed: true when there are no new changes to commit', () => {
     mockExecFileSync.mockImplementation((_cmd, args) => {
       const argsArr = args as string[];
       if (includesCommand(argsArr, 'status')) {
@@ -103,7 +104,7 @@ describe('autoCommitAndPush', () => {
 
     expect(result.success).toBe(true);
     expect(result.commitHash).toBeUndefined();
-    expect(result.message).toBe('No changes to commit');
+    expect(result.pushed).toBe(true);
 
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
@@ -122,11 +123,11 @@ describe('autoCommitAndPush', () => {
       mockExecFileSync.mock.calls.some(call => includesCommand(call[1] as string[], 'commit'))
     ).toBe(false);
 
-    // Verify push was NOT called
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
+    // Verify push WAS called even without a new commit
+    expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['push', '/project', 'HEAD'],
-      expect.anything()
+      expect.objectContaining({ cwd: '/tmp/clone' })
     );
   });
 
@@ -139,8 +140,58 @@ describe('autoCommitAndPush', () => {
 
     expect(result.success).toBe(false);
     expect(result.commitHash).toBeUndefined();
+    expect(result.pushed).toBeUndefined();
     expect(result.message).toContain('Auto-commit failed');
     expect(result.message).toContain('not a git repository');
+  });
+
+  it('should return failure when push fails after no commit', () => {
+    mockExecFileSync.mockImplementation((_cmd, args) => {
+      const argsArr = args as string[];
+      if (includesCommand(argsArr, 'status')) {
+        return ''; // No changes
+      }
+      if (includesCommand(argsArr, 'config')) {
+        return '';
+      }
+      if (includesCommand(argsArr, 'push')) {
+        throw new Error('fatal: remote rejected');
+      }
+      return Buffer.from('');
+    });
+
+    const result = autoCommitAndPush('/tmp/clone', 'my-task', '/project');
+
+    expect(result.success).toBe(false);
+    expect(result.commitHash).toBeUndefined();
+    expect(result.pushed).toBeUndefined();
+    expect(result.message).toContain('Auto-commit failed');
+    expect(result.message).toContain('fatal: remote rejected');
+  });
+
+  it('should return failure when push fails after successful commit', () => {
+    mockExecFileSync.mockImplementation((_cmd, args) => {
+      const argsArr = args as string[];
+      if (includesCommand(argsArr, 'status')) {
+        return 'M src/index.ts\n';
+      }
+      if (includesCommand(argsArr, 'rev-parse')) {
+        return 'abc1234\n';
+      }
+      if (includesCommand(argsArr, 'config')) {
+        return '';
+      }
+      if (includesCommand(argsArr, 'push')) {
+        throw new Error('fatal: remote rejected');
+      }
+      return Buffer.from('');
+    });
+
+    const result = autoCommitAndPush('/tmp/clone', 'my-task', '/project');
+
+    expect(result.success).toBe(false);
+    expect(result.pushed).toBeUndefined();
+    expect(result.message).toContain('Auto-commit failed');
   });
 
   it('should not include co-author in commit message', () => {

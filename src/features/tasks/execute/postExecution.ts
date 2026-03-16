@@ -41,13 +41,18 @@ export async function postExecutionFlow(options: PostExecutionOptions): Promise<
   const { execCwd, projectCwd, task, branch, baseBranch, shouldCreatePr, draftPr, pieceIdentifier, issues, repo } = options;
 
   const commitResult = autoCommitAndPush(execCwd, task, projectCwd);
-  if (commitResult.success && commitResult.commitHash) {
-    success(`Auto-committed & pushed: ${commitResult.commitHash}`);
+  const hasRemoteUpdate = commitResult.success && (commitResult.commitHash || commitResult.pushed);
+  if (hasRemoteUpdate) {
+    if (commitResult.commitHash) {
+      success(`Auto-committed & pushed: ${commitResult.commitHash}`);
+    } else {
+      success('Pushed existing commits');
+    }
   } else if (!commitResult.success) {
     error(`Auto-commit failed: ${commitResult.message}`);
   }
 
-  if (commitResult.success && commitResult.commitHash && branch && shouldCreatePr) {
+  if (hasRemoteUpdate && branch && shouldCreatePr) {
     try {
       pushBranch(projectCwd, branch);
     } catch (pushError) {

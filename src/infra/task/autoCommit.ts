@@ -19,6 +19,8 @@ export interface AutoCommitResult {
   success: boolean;
   /** The short commit hash (if committed) */
   commitHash?: string;
+  /** Whether the push was executed successfully */
+  pushed?: boolean;
   /** Human-readable message */
   message: string;
 }
@@ -27,15 +29,6 @@ export interface AutoCommitResult {
  * Handles auto-commit and push operations for clone tasks.
  */
 export class AutoCommitter {
-  /**
-   * Auto-commit all changes and push to the main project.
-   *
-   * Steps:
-   * 1. Stage all changes (git add -A)
-   * 2. Check if there are staged changes
-   * 3. If changes exist, create a commit with "takt: {taskName}"
-   * 4. Push to the main project directory
-   */
   commitAndPush(cloneCwd: string, taskName: string, projectDir: string): AutoCommitResult {
     log.info('Auto-commit starting', { cwd: cloneCwd, taskName });
 
@@ -46,12 +39,11 @@ export class AutoCommitter {
         allowGitFilters: resolveConfigValue(projectDir, 'allowGitFilters') ?? false,
       });
 
-      if (!commitHash) {
+      if (commitHash) {
+        log.info('Auto-commit created', { commitHash, message: commitMessage });
+      } else {
         log.info('No changes to commit');
-        return { success: true, message: 'No changes to commit' };
       }
-
-      log.info('Auto-commit created', { commitHash, message: commitMessage });
 
       execFileSync('git', ['push', projectDir, 'HEAD'], {
         cwd: cloneCwd,
@@ -60,9 +52,14 @@ export class AutoCommitter {
 
       log.info('Pushed to main repo', { projectDir });
 
+      if (!commitHash) {
+        return { success: true, pushed: true, message: 'No changes to commit, pushed existing commits' };
+      }
+
       return {
         success: true,
         commitHash,
+        pushed: true,
         message: `Committed & pushed: ${commitHash} - ${commitMessage}`,
       };
     } catch (err) {

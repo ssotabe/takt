@@ -96,13 +96,44 @@ describe('postExecutionFlow', () => {
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
   });
 
-  it('commit がない場合は PR 関連処理をスキップする', async () => {
+  it('commit がなく pushed もない場合は PR 関連処理をスキップする', async () => {
     mockAutoCommitAndPush.mockReturnValue({ success: true, commitHash: undefined });
 
     await postExecutionFlow(baseOptions);
 
     expect(mockFindExistingPr).not.toHaveBeenCalled();
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('commitHash なしでも pushed: true の場合は PR 作成ブロックに入る', async () => {
+    mockAutoCommitAndPush.mockReturnValue({ success: true, commitHash: undefined, pushed: true });
+    mockFindExistingPr.mockReturnValue(undefined);
+
+    const result = await postExecutionFlow(baseOptions);
+
+    expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
+    expect(result.prUrl).toBe('https://github.com/org/repo/pull/1');
+  });
+
+  it('commitHash なし + pushed: true + 既存PR ありの場合はコメントを追加する', async () => {
+    mockAutoCommitAndPush.mockReturnValue({ success: true, commitHash: undefined, pushed: true });
+    mockFindExistingPr.mockReturnValue({ number: 42, url: 'https://github.com/org/repo/pull/42' });
+
+    const result = await postExecutionFlow(baseOptions);
+
+    expect(mockCommentOnPr).toHaveBeenCalledWith('/project', 42, 'pr-body');
+    expect(mockCreatePullRequest).not.toHaveBeenCalled();
+    expect(result.prUrl).toBe('https://github.com/org/repo/pull/42');
+  });
+
+  it('commitHash あり + pushed: true の場合も PR 作成ブロックに入る', async () => {
+    mockAutoCommitAndPush.mockReturnValue({ success: true, commitHash: 'abc123', pushed: true });
+    mockFindExistingPr.mockReturnValue(undefined);
+
+    const result = await postExecutionFlow(baseOptions);
+
+    expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
+    expect(result.prUrl).toBe('https://github.com/org/repo/pull/1');
   });
 
   it('branch がない場合は PR 関連処理をスキップする', async () => {
