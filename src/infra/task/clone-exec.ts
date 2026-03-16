@@ -92,10 +92,15 @@ export function cloneAndIsolate(projectDir: string, clonePath: string, branch?: 
     }
   }
 
-  execFileSync('git', ['remote', 'remove', 'origin'], {
-    cwd: clonePath,
-    stdio: 'pipe',
-  });
+  try {
+    execFileSync('git', ['remote', 'remove', 'origin'], {
+      cwd: clonePath,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    // Parent worktree (shared clone) may not have an origin remote
+    log.debug('Failed to remove origin remote (may not exist)', { clonePath, error: String(err) });
+  }
 
   for (const key of ['user.name', 'user.email']) {
     try {

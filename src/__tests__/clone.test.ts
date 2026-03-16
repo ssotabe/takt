@@ -1096,6 +1096,79 @@ describe('cleanupOrphanedClone path traversal protection', () => {
   });
 });
 
+describe('cloneAndIsolate: git remote remove origin failure tolerance', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLoadProjectConfig.mockReturnValue({});
+  });
+
+  it('should succeed when git remote remove origin fails (parent worktree has no origin)', () => {
+    // Given: git remote remove origin throws (origin does not exist in parent worktree clone)
+    mockExecFileSync.mockImplementation((_cmd, args) => {
+      const argsArr = args as string[];
+
+      if (argsArr[0] === 'rev-parse' && argsArr[1] === '--abbrev-ref' && argsArr[2] === 'HEAD') {
+        return 'main\n';
+      }
+      if (argsArr[0] === 'clone') return Buffer.from('');
+      if (argsArr[0] === 'remote' && argsArr[1] === 'remove') {
+        throw new Error("error: No such remote: 'origin'");
+      }
+      if (argsArr[0] === 'config' && argsArr[1] === '--local') {
+        throw new Error('not set');
+      }
+      if (argsArr[0] === 'config') return Buffer.from('');
+      if (argsArr[0] === 'show-ref') throw new Error('branch not found');
+      if (argsArr[0] === 'checkout') return Buffer.from('');
+      return Buffer.from('');
+    });
+
+    // When: creating a shared clone (should not throw)
+    const result = createSharedClone('/project', {
+      worktree: '/tmp/clone-no-origin',
+      taskSlug: 'no-origin-task',
+    });
+
+    // Then: clone should succeed despite origin removal failure
+    expect(result.branch).toMatch(/no-origin-task$/);
+    expect(result.path).toBe('/tmp/clone-no-origin');
+  });
+
+  it('should log debug message when git remote remove origin fails', () => {
+    // Given: git remote remove origin throws
+    mockExecFileSync.mockImplementation((_cmd, args) => {
+      const argsArr = args as string[];
+
+      if (argsArr[0] === 'rev-parse' && argsArr[1] === '--abbrev-ref' && argsArr[2] === 'HEAD') {
+        return 'main\n';
+      }
+      if (argsArr[0] === 'clone') return Buffer.from('');
+      if (argsArr[0] === 'remote' && argsArr[1] === 'remove') {
+        throw new Error("error: No such remote: 'origin'");
+      }
+      if (argsArr[0] === 'config' && argsArr[1] === '--local') {
+        throw new Error('not set');
+      }
+      if (argsArr[0] === 'config') return Buffer.from('');
+      if (argsArr[0] === 'show-ref') throw new Error('branch not found');
+      if (argsArr[0] === 'checkout') return Buffer.from('');
+      return Buffer.from('');
+    });
+
+    // When
+    createSharedClone('/project', {
+      worktree: '/tmp/clone-no-origin-log',
+      taskSlug: 'no-origin-log',
+    });
+
+    // Then: debug log should have been called about remote removal failure
+    expect(mockLogDebug).toHaveBeenCalledWith(
+      expect.stringContaining('origin'),
+      expect.objectContaining({ clonePath: '/tmp/clone-no-origin-log' }),
+    );
+  });
+});
+
 describe('resolveCloneBaseDir parent-not-writable fallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();

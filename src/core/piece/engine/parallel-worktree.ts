@@ -5,12 +5,12 @@
  * each parallel piece_call slot.
  */
 
-import { existsSync, cpSync } from 'node:fs';
+import { existsSync, cpSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createSharedClone, removeClone } from '../../../infra/task/clone.js';
+import { createSharedClone } from '../../../infra/task/clone.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
-import { stageAndCommit } from '../../../infra/task/git.js';
+import { stageAndCommit, getCurrentBranch } from '../../../infra/task/git.js';
 import { getProvider, type ProviderType } from '../../../infra/providers/index.js';
 import { resolveConfigValues, getLanguage } from '../../../infra/config/index.js';
 import { loadTemplate } from '../../../shared/prompts/index.js';
@@ -18,11 +18,31 @@ import { StreamDisplay } from '../../../shared/ui/index.js';
 
 const log = createLogger('parallel-worktree');
 
+function generateTimestamp(): string {
+  return new Date().toISOString().replace(/[-:.]/g, '').slice(0, 13);
+}
+
 export function createParallelWorktree(
   projectDir: string,
   slotName: string,
 ): { path: string; branch: string } {
-  return createSharedClone(projectDir, { taskSlug: slotName, worktree: true });
+  try {
+    stageAndCommit(projectDir, 'takt: auto-commit before child worktree');
+  } catch (err) {
+    log.info('Auto-commit skipped before child worktree', { projectDir, error: getErrorMessage(err) });
+  }
+
+  const currentBranch = getCurrentBranch(projectDir);
+
+  const worktreeBaseDir = join(projectDir, '.takt', 'worktrees');
+  mkdirSync(worktreeBaseDir, { recursive: true });
+  const clonePath = join(worktreeBaseDir, `${generateTimestamp()}-${slotName}`);
+
+  return createSharedClone(projectDir, {
+    taskSlug: slotName,
+    worktree: clonePath,
+    baseBranch: currentBranch,
+  });
 }
 
 /** Auto-approve all tool invocations (agent runs in isolated worktree) */
@@ -129,7 +149,5 @@ export async function cleanupParallelWorktree(
     }
   } catch (err) {
     log.error('Failed to copy child runs to parent', { childRunsDir, parentRunsDir, error: String(err) });
-  } finally {
-    removeClone(worktreePath);
   }
 }

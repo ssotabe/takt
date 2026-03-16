@@ -10,11 +10,12 @@
  * - cleanupParallelWorktree: skips merge and auto-commit when shouldMerge=false
  * - cleanupParallelWorktree: continues cleanup when merge fails and AI resolution fails
  * - cleanupParallelWorktree: AI resolves merge conflict successfully
- * - cleanupParallelWorktree: executes stageAndCommit → merge → runs copy → clone removal in order
+ * - cleanupParallelWorktree: executes stageAndCommit → merge → runs copy (no clone removal)
  * - cleanupParallelWorktree: trims whitespace from rev-parse output
  * - cleanupParallelWorktree: calls merge --abort only after AI resolution fails
  * - cleanupParallelWorktree: continues cleanup when stageAndCommit fails
  * - cleanupParallelWorktree: passes slotInstruction to AI conflict resolver template
+ * - cleanupParallelWorktree: does not call removeClone (parent cleanup handles it)
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -31,6 +32,7 @@ vi.mock('node:fs', async (importOriginal) => {
     ...original,
     existsSync: vi.fn(),
     cpSync: vi.fn(),
+    mkdirSync: vi.fn(),
   };
 });
 
@@ -40,6 +42,7 @@ vi.mock('node:child_process', () => ({
 
 vi.mock('../infra/task/git.js', () => ({
   stageAndCommit: vi.fn(),
+  getCurrentBranch: vi.fn(),
 }));
 
 vi.mock('../infra/providers/index.js', () => ({
@@ -199,7 +202,7 @@ describe('cleanupParallelWorktree with merge', () => {
   // 2. shouldMerge=true: merge before cleanup
   // =====================================================
   describe('shouldMerge=true', () => {
-    it('should call mergeChildBranch before runs copy and clone removal', async () => {
+    it('should call mergeChildBranch before runs copy', async () => {
       // Given: merge succeeds, worktree has .takt/runs/
       mockSuccessfulMergeFlow();
       vi.mocked(existsSync).mockReturnValue(true);
@@ -235,9 +238,9 @@ describe('cleanupParallelWorktree with merge', () => {
         expect.objectContaining({ stdio: 'pipe' }),
       );
 
-      // Then: runs copy and clone removal also happened
+      // Then: runs copy happened, but removeClone was NOT called
       expect(cpSync).toHaveBeenCalled();
-      expect(removeClone).toHaveBeenCalledWith(worktreePath);
+      expect(removeClone).not.toHaveBeenCalled();
     });
 
     it('should trim whitespace from rev-parse output', async () => {
@@ -270,7 +273,7 @@ describe('cleanupParallelWorktree with merge', () => {
   // 3. shouldMerge=false: skip merge
   // =====================================================
   describe('shouldMerge=false', () => {
-    it('should skip merge and proceed directly to runs copy and clone removal', async () => {
+    it('should skip merge and proceed directly to runs copy without clone removal', async () => {
       // Given: worktree with .takt/runs/
       vi.mocked(existsSync).mockReturnValue(true);
 
@@ -280,9 +283,9 @@ describe('cleanupParallelWorktree with merge', () => {
       // Then: no git operations (merge skipped)
       expect(execFileSync).not.toHaveBeenCalled();
 
-      // Then: runs copy and clone removal still happen
+      // Then: runs copy happens, but removeClone is NOT called
       expect(cpSync).toHaveBeenCalled();
-      expect(removeClone).toHaveBeenCalledWith(worktreePath);
+      expect(removeClone).not.toHaveBeenCalled();
     });
   });
 
@@ -352,8 +355,8 @@ describe('cleanupParallelWorktree with merge', () => {
         expect.objectContaining({ stdio: 'pipe' }),
       );
 
-      // Then: cleanup should still complete
-      expect(removeClone).toHaveBeenCalledWith(worktreePath);
+      // Then: cleanup should still complete (no removeClone)
+      expect(removeClone).not.toHaveBeenCalled();
     });
 
     it('should pass slotInstruction as originalInstruction to template', async () => {
@@ -392,17 +395,17 @@ describe('cleanupParallelWorktree with merge', () => {
         expect.anything(),
       );
 
-      // Then: runs copy and clone removal still happened
+      // Then: runs copy happened, but removeClone was NOT called
       expect(cpSync).toHaveBeenCalled();
-      expect(removeClone).toHaveBeenCalledWith(worktreePath);
+      expect(removeClone).not.toHaveBeenCalled();
     });
   });
 
   // =====================================================
-  // 5. Ordering: stageAndCommit → merge → runs copy → clone removal
+  // 5. Ordering: stageAndCommit → merge → runs copy (no clone removal)
   // =====================================================
   describe('execution ordering', () => {
-    it('should execute stageAndCommit → merge → runs copy → clone removal', async () => {
+    it('should execute stageAndCommit → merge → runs copy without clone removal', async () => {
       // Given: track call order
       const callOrder: string[] = [];
 
@@ -438,8 +441,8 @@ describe('cleanupParallelWorktree with merge', () => {
       // When
       await cleanupParallelWorktree(worktreePath, parentCwd, true);
 
-      // Then: stageAndCommit → fetch → merge → cpSync → removeClone
-      expect(callOrder).toEqual(['stageAndCommit', 'fetch', 'merge', 'cpSync', 'removeClone']);
+      // Then: stageAndCommit → fetch → merge → cpSync (no removeClone)
+      expect(callOrder).toEqual(['stageAndCommit', 'fetch', 'merge', 'cpSync']);
     });
   });
 
@@ -455,8 +458,8 @@ describe('cleanupParallelWorktree with merge', () => {
       // When: calling with slotInstruction
       await cleanupParallelWorktree(worktreePath, parentCwd, true, 'slot task description');
 
-      // Then: should complete without error
-      expect(removeClone).toHaveBeenCalledWith(worktreePath);
+      // Then: should complete without error (no removeClone call)
+      expect(removeClone).not.toHaveBeenCalled();
     });
 
     it('should work without slotInstruction (undefined)', async () => {
@@ -467,8 +470,39 @@ describe('cleanupParallelWorktree with merge', () => {
       // When: calling without slotInstruction
       await cleanupParallelWorktree(worktreePath, parentCwd, true);
 
-      // Then: should complete without error
-      expect(removeClone).toHaveBeenCalledWith(worktreePath);
+      // Then: should complete without error (no removeClone call)
+      expect(removeClone).not.toHaveBeenCalled();
+    });
+  });
+
+  // =====================================================
+  // 7. removeClone is never called
+  // =====================================================
+  describe('removeClone not called', () => {
+    it('should not call removeClone in any cleanup scenario', async () => {
+      // Given: merge succeeds, runs exist
+      mockSuccessfulMergeFlow();
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      // When
+      await cleanupParallelWorktree(worktreePath, parentCwd, true);
+
+      // Then: removeClone should never be called
+      expect(removeClone).not.toHaveBeenCalled();
+    });
+
+    it('should not call removeClone even when cpSync fails', async () => {
+      // Given: cpSync throws
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(cpSync).mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+
+      // When
+      await cleanupParallelWorktree(worktreePath, parentCwd, false);
+
+      // Then: removeClone should never be called
+      expect(removeClone).not.toHaveBeenCalled();
     });
   });
 });
