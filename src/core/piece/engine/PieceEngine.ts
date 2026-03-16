@@ -172,7 +172,6 @@ export class PieceEngine extends EventEmitter {
       engineOptions: this.options,
       pieceCallRunner: this.pieceCallRunner,
       getCwd: () => this.cwd,
-      getProjectCwd: () => this.projectCwd,
       getReportDirSlug: () => this.runPaths.slug,
       getInteractive: () => this.options.interactive === true,
       detectRuleIndex: this.detectRuleIndex,

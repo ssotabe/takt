@@ -41,7 +41,6 @@ export interface ParallelRunnerDeps {
   readonly engineOptions: PieceEngineOptions;
   readonly pieceCallRunner?: PieceCallRunner;
   readonly getCwd: () => string;
-  readonly getProjectCwd: () => string;
   readonly getReportDirSlug: () => string;
   readonly getInteractive: () => boolean;
   readonly detectRuleIndex: (content: string, movementName: string) => number;
@@ -120,7 +119,7 @@ export class ParallelRunner {
     };
 
     const slotContext = prepareSlotContext(
-      subMovements, state, this.deps.getReportDirSlug(), this.deps.getProjectCwd(),
+      subMovements, state, this.deps.getReportDirSlug(), this.deps.getCwd(),
     );
 
     // Run all sub-movements concurrently (failures are captured, not thrown)
@@ -149,7 +148,7 @@ export class ParallelRunner {
             return { subMovement, response: finalResponse, instruction: subInstruction };
           } finally {
             if (worktreeInfo) {
-              cleanupParallelWorktree(worktreeInfo.path, this.deps.getProjectCwd(), shouldMerge);
+              cleanupParallelWorktree(worktreeInfo.path, this.deps.getCwd(), shouldMerge);
             }
           }
         }
