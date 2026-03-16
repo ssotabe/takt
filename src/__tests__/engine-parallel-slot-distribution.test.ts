@@ -385,16 +385,19 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         '/tmp/worktrees/slot_1',
         tmpDir,
         true,
+        expect.any(String),
       );
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_2',
         tmpDir,
         true,
+        expect.any(String),
       );
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_3',
         tmpDir,
         true,
+        expect.any(String),
       );
     });
 
@@ -452,16 +455,19 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         '/tmp/worktrees/slot_1',
         tmpDir,
         true,
+        expect.any(String),
       );
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_2',
         tmpDir,
         false,
+        expect.any(String),
       );
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_3',
         tmpDir,
         true,
+        expect.any(String),
       );
     });
   });

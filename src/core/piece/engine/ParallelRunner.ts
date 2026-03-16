@@ -148,7 +148,12 @@ export class ParallelRunner {
             return { subMovement, response: finalResponse, instruction: subInstruction };
           } finally {
             if (worktreeInfo) {
-              cleanupParallelWorktree(worktreeInfo.path, this.deps.getCwd(), shouldMerge);
+              await cleanupParallelWorktree(
+                worktreeInfo.path,
+                this.deps.getCwd(),
+                shouldMerge,
+                slotOverrides?.initialPreviousResponse?.content,
+              );
             }
           }
         }

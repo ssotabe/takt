@@ -10,7 +10,7 @@
  * - shouldMerge=false: child piece completes with ABORT condition
  * - shouldMerge=false: child piece throws (try block exits via exception)
  * - Mixed results: each slot gets its own shouldMerge based on its outcome
- * - 3-arg signature: cleanupParallelWorktree receives worktreePath, parentCwd, shouldMerge
+ * - 4-arg signature: cleanupParallelWorktree receives worktreePath, parentCwd, shouldMerge, slotInstruction
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -207,11 +207,13 @@ describe('PieceEngine Integration: shouldMerge parameter in cleanup', () => {
         '/tmp/worktrees/slot_1',
         tmpDir,
         true,
+        expect.any(String),
       );
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_2',
         tmpDir,
         true,
+        expect.any(String),
       );
     });
   });
@@ -268,11 +270,13 @@ describe('PieceEngine Integration: shouldMerge parameter in cleanup', () => {
         '/tmp/worktrees/slot_1',
         tmpDir,
         true,
+        expect.any(String),
       );
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_2',
         tmpDir,
         false,
+        expect.any(String),
       );
     });
   });
@@ -324,10 +328,10 @@ describe('PieceEngine Integration: shouldMerge parameter in cleanup', () => {
   });
 
   // =====================================================
-  // 4. 3-arg signature verification
+  // 4. 4-arg signature verification
   // =====================================================
-  describe('3-arg signature', () => {
-    it('should call cleanupParallelWorktree with exactly 3 arguments', async () => {
+  describe('4-arg signature', () => {
+    it('should call cleanupParallelWorktree with exactly 4 arguments', async () => {
       // Given
       const slotMap = new Map<string, string>([
         ['slot_1', 'Task 1'],
@@ -361,16 +365,18 @@ describe('PieceEngine Integration: shouldMerge parameter in cleanup', () => {
 
       await engine.run();
 
-      // Then: each call should have exactly 3 arguments (worktreePath, parentCwd, shouldMerge)
+      // Then: each call should have exactly 4 arguments (worktreePath, parentCwd, shouldMerge, slotInstruction)
       const calls = vi.mocked(cleanupParallelWorktree).mock.calls;
       for (const call of calls) {
-        expect(call).toHaveLength(3);
+        expect(call).toHaveLength(4);
         // 1st arg: worktree path (string)
         expect(typeof call[0]).toBe('string');
         // 2nd arg: parent cwd (string)
         expect(typeof call[1]).toBe('string');
         // 3rd arg: shouldMerge (boolean)
         expect(typeof call[2]).toBe('boolean');
+        // 4th arg: slotInstruction (string)
+        expect(typeof call[3]).toBe('string');
       }
     });
   });

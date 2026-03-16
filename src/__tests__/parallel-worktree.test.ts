@@ -33,6 +33,29 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
+vi.mock('../infra/task/git.js', () => ({
+  stageAndCommit: vi.fn(),
+}));
+
+vi.mock('../infra/providers/index.js', () => ({
+  getProvider: vi.fn(),
+}));
+
+vi.mock('../infra/config/index.js', () => ({
+  resolveConfigValues: vi.fn(),
+  getLanguage: vi.fn(),
+}));
+
+vi.mock('../shared/prompts/index.js', () => ({
+  loadTemplate: vi.fn(),
+}));
+
+vi.mock('../shared/ui/index.js', () => ({
+  StreamDisplay: vi.fn().mockImplementation(function () {
+    return { createHandler: vi.fn().mockReturnValue(vi.fn()) };
+  }),
+}));
+
 import { createParallelWorktree, cleanupParallelWorktree } from '../core/piece/engine/parallel-worktree.js';
 import { createSharedClone, removeClone } from '../infra/task/clone.js';
 import { existsSync, cpSync } from 'node:fs';
@@ -101,7 +124,7 @@ describe('cleanupParallelWorktree', () => {
   // 1. Normal cleanup: copy runs + remove worktree
   // =====================================================
   describe('normal cleanup', () => {
-    it('should copy .takt/runs/ from worktree to parent and remove worktree', () => {
+    it('should copy .takt/runs/ from worktree to parent and remove worktree', async () => {
       // Given: worktree with .takt/runs/ directory
       const worktreePath = '/tmp/worktrees/slot_1-clone';
       const parentCwd = '/workspace/project';
@@ -111,7 +134,7 @@ describe('cleanupParallelWorktree', () => {
       });
 
       // When: cleaning up the worktree (shouldMerge=false to test basic cleanup only)
-      cleanupParallelWorktree(worktreePath, parentCwd, false);
+      await cleanupParallelWorktree(worktreePath, parentCwd, false);
 
       // Then: should copy runs directory
       expect(cpSync).toHaveBeenCalledWith(
@@ -129,7 +152,7 @@ describe('cleanupParallelWorktree', () => {
   // 2. Cleanup when child piece failed (still copies runs)
   // =====================================================
   describe('cleanup after failure', () => {
-    it('should still copy runs and remove worktree when child piece failed', () => {
+    it('should still copy runs and remove worktree when child piece failed', async () => {
       // Given: worktree exists with runs (even after failure)
       const worktreePath = '/tmp/worktrees/slot_2-clone';
       const parentCwd = '/workspace/project';
@@ -139,7 +162,7 @@ describe('cleanupParallelWorktree', () => {
       });
 
       // When: cleanup runs (called from finally block, shouldMerge=false)
-      cleanupParallelWorktree(worktreePath, parentCwd, false);
+      await cleanupParallelWorktree(worktreePath, parentCwd, false);
 
       // Then: runs are copied and worktree is removed
       expect(cpSync).toHaveBeenCalled();
@@ -151,14 +174,14 @@ describe('cleanupParallelWorktree', () => {
   // 3. Cleanup when .takt/runs/ does not exist
   // =====================================================
   describe('missing .takt/runs/', () => {
-    it('should skip copy but still remove worktree when .takt/runs/ does not exist', () => {
+    it('should skip copy but still remove worktree when .takt/runs/ does not exist', async () => {
       // Given: worktree without .takt/runs/
       const worktreePath = '/tmp/worktrees/slot_3-clone';
       const parentCwd = '/workspace/project';
       vi.mocked(existsSync).mockReturnValue(false);
 
       // When
-      cleanupParallelWorktree(worktreePath, parentCwd, false);
+      await cleanupParallelWorktree(worktreePath, parentCwd, false);
 
       // Then: cpSync should NOT be called (no runs to copy)
       expect(cpSync).not.toHaveBeenCalled();
@@ -172,7 +195,7 @@ describe('cleanupParallelWorktree', () => {
   // 4. Cleanup should always remove worktree even if copy fails
   // =====================================================
   describe('copy failure does not prevent worktree removal', () => {
-    it('should remove worktree even when cpSync throws', () => {
+    it('should remove worktree even when cpSync throws', async () => {
       // Given: cpSync will throw an error
       const worktreePath = '/tmp/worktrees/slot_1-clone';
       const parentCwd = '/workspace/project';
@@ -182,7 +205,7 @@ describe('cleanupParallelWorktree', () => {
       });
 
       // When: cleanup runs (should not throw, shouldMerge=false)
-      cleanupParallelWorktree(worktreePath, parentCwd, false);
+      await cleanupParallelWorktree(worktreePath, parentCwd, false);
 
       // Then: worktree removal should still be attempted
       expect(removeClone).toHaveBeenCalledWith(worktreePath);

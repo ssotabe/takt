@@ -269,16 +269,65 @@ describe('ParallelRunner: child worktree base directory uses parent cwd (not pro
       '/tmp/child-worktrees/slot_1',
       dirs.parentWorktree,
       true,
+      expect.any(String),
     );
     expect(cleanupParallelWorktree).toHaveBeenCalledWith(
       '/tmp/child-worktrees/slot_2',
       dirs.parentWorktree,
       true,
+      expect.any(String),
     );
 
     // Verify merge target is NOT projectRoot
     for (const call of vi.mocked(cleanupParallelWorktree).mock.calls) {
       expect(call[1]).not.toBe(dirs.projectRoot);
+    }
+  });
+
+  it('should pass slotInstruction to cleanupParallelWorktree', async () => {
+    // Given: cwd (parentWorktree) ≠ projectCwd (projectRoot), slot sections parsed
+    const slotMap = new Map<string, string>([
+      ['slot_1', 'Task 1 instruction'],
+      ['slot_2', 'Task 2 instruction'],
+    ]);
+    vi.mocked(parseSlotSections).mockReturnValue(slotMap);
+    vi.mocked(createParallelWorktree).mockImplementation((_baseDir, slotName) => ({
+      path: `/tmp/child-worktrees/${slotName}`,
+      branch: `parallel-${slotName}`,
+    }));
+
+    const childConfig = makeChildPieceConfig();
+    const loadPiece = vi.fn().mockReturnValue(childConfig);
+    const config = buildParallelPieceCallConfig();
+
+    engine = new PieceEngine(config, dirs.parentWorktree, 'test task', {
+      projectCwd: dirs.projectRoot,
+      loadPieceByIdentifier: loadPiece,
+      initialPreviousResponse: makeResponse({
+        content: '## slot_1\nTask 1 instruction\n\n## slot_2\nTask 2 instruction',
+      }),
+    });
+
+    mockRunAgentSequence([
+      makeResponse({ persona: 'child-step', content: 'Done 1' }),
+      makeResponse({ persona: 'child-step', content: 'Done 2' }),
+    ]);
+
+    mockDetectMatchedRuleSequence([
+      { index: 0, method: 'phase1_tag' },
+      { index: 0, method: 'phase1_tag' },
+      { index: 0, method: 'phase1_tag' },
+      { index: 0, method: 'phase1_tag' },
+      { index: 0, method: 'aggregate' },
+    ]);
+
+    // When
+    await engine.run();
+
+    // Then: cleanupParallelWorktree should receive slotInstruction (4th arg)
+    expect(cleanupParallelWorktree).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(cleanupParallelWorktree).mock.calls) {
+      expect(call[3]).toEqual(expect.any(String));
     }
   });
 
@@ -334,6 +383,7 @@ describe('ParallelRunner: child worktree base directory uses parent cwd (not pro
       '/tmp/child-worktrees/slot_1',
       dirs.parentWorktree,
       true,
+      expect.any(String),
     );
 
     // slot_2: shouldMerge=false (ABORT), merge target still = parentWorktree
@@ -341,6 +391,7 @@ describe('ParallelRunner: child worktree base directory uses parent cwd (not pro
       '/tmp/child-worktrees/slot_2',
       dirs.parentWorktree,
       false,
+      expect.any(String),
     );
 
     // Verify neither call uses projectRoot

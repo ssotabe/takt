@@ -9,7 +9,12 @@ import { existsSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createSharedClone, removeClone } from '../../../infra/task/clone.js';
-import { createLogger } from '../../../shared/utils/index.js';
+import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
+import { stageAndCommit } from '../../../infra/task/git.js';
+import { getProvider, type ProviderType } from '../../../infra/providers/index.js';
+import { resolveConfigValues, getLanguage } from '../../../infra/config/index.js';
+import { loadTemplate } from '../../../shared/prompts/index.js';
+import { StreamDisplay } from '../../../shared/ui/index.js';
 
 const log = createLogger('parallel-worktree');
 
@@ -20,7 +25,45 @@ export function createParallelWorktree(
   return createSharedClone(projectDir, { taskSlug: slotName, worktree: true });
 }
 
-function mergeChildBranch(childClonePath: string, parentCwd: string): void {
+/** Auto-approve all tool invocations (agent runs in isolated worktree) */
+async function autoApproveAll(request: { toolName: string; input: Record<string, unknown> }) {
+  return { behavior: 'allow' as const, updatedInput: request.input };
+}
+
+function abortMerge(parentCwd: string): void {
+  try {
+    execFileSync('git', ['-C', parentCwd, 'merge', '--abort'], { stdio: 'pipe' });
+  } catch (abortError) {
+    log.error('merge --abort failed', { parentCwd, error: getErrorMessage(abortError) });
+  }
+}
+
+async function attemptAiConflictResolution(parentCwd: string, slotInstruction?: string): Promise<boolean> {
+  const lang = getLanguage();
+  const originalInstruction = slotInstruction ?? '(no slot instruction available)';
+  const systemPrompt = loadTemplate('sync_conflict_resolver_system_prompt', lang);
+  const prompt = loadTemplate('sync_conflict_resolver_message', lang, { originalInstruction });
+
+  const config = resolveConfigValues(parentCwd, ['provider', 'model']);
+  if (!config.provider) {
+    throw new Error('No provider configured');
+  }
+  const providerType = config.provider as ProviderType;
+  const provider = getProvider(providerType);
+  const agent = provider.setup({ name: 'conflict-resolver', systemPrompt });
+
+  const response = await agent.call(prompt, {
+    cwd: parentCwd,
+    model: config.model,
+    permissionMode: 'edit',
+    onPermissionRequest: autoApproveAll,
+    onStream: new StreamDisplay('conflict-resolver', false).createHandler(),
+  });
+
+  return response.status === 'done';
+}
+
+async function mergeChildBranch(childClonePath: string, parentCwd: string, slotInstruction?: string): Promise<void> {
   const headHash = execFileSync('git', ['-C', childClonePath, 'rev-parse', 'HEAD'], {
     encoding: 'utf-8',
     stdio: 'pipe',
@@ -39,22 +82,40 @@ function mergeChildBranch(childClonePath: string, parentCwd: string): void {
     execFileSync('git', ['-C', parentCwd, 'merge', '--no-edit', 'FETCH_HEAD'], { stdio: 'pipe' });
   } catch (mergeError) {
     try {
-      execFileSync('git', ['-C', parentCwd, 'merge', '--abort'], { stdio: 'pipe' });
-    } catch {
-      // abort failure is secondary; the original merge error is more important
+      const resolved = await attemptAiConflictResolution(parentCwd, slotInstruction);
+      if (resolved) {
+        log.info('AI conflict resolution succeeded', { parentCwd });
+        return;
+      }
+    } catch (aiError) {
+      log.info('AI conflict resolution unavailable, falling back to abort', {
+        parentCwd, error: getErrorMessage(aiError),
+      });
     }
+    abortMerge(parentCwd);
     throw mergeError;
   }
 }
 
-export function cleanupParallelWorktree(
+export async function cleanupParallelWorktree(
   worktreePath: string,
   parentCwd: string,
   shouldMerge: boolean,
-): void {
+  slotInstruction?: string,
+): Promise<void> {
   if (shouldMerge) {
     try {
-      mergeChildBranch(worktreePath, parentCwd);
+      const hash = stageAndCommit(worktreePath, 'takt: auto-commit before merge', {
+        allowGitHooks: false,
+        allowGitFilters: false,
+      });
+      if (hash) log.info('Auto-committed before merge', { worktreePath, hash });
+    } catch (err) {
+      log.info('Auto-commit skipped', { worktreePath, error: getErrorMessage(err) });
+    }
+
+    try {
+      await mergeChildBranch(worktreePath, parentCwd, slotInstruction);
     } catch (err) {
       log.error('Failed to merge child branch into parent', { worktreePath, parentCwd, error: String(err) });
     }
