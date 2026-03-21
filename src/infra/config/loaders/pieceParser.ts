@@ -331,6 +331,7 @@ function normalizeStepFromRaw(
       globalOverrides,
     ),
     passPreviousResponse: step.pass_previous_response ?? true,
+    ...((step as Record<string, unknown>).timeout_ms != null && { timeoutMs: (step as Record<string, unknown>).timeout_ms as number }),
     policyContents,
     knowledgeContents,
   };
@@ -349,6 +350,12 @@ function normalizeStepFromRaw(
         globalOverrides,
       ),
     );
+  }
+
+  const rawParallelConfig = (step as Record<string, unknown>).parallel_config as
+    { timeout_ms: number } | undefined;
+  if (rawParallelConfig) {
+    result.parallelConfig = { timeoutMs: rawParallelConfig.timeout_ms };
   }
 
   const arpeggioConfig = normalizeArpeggio(step.arpeggio, pieceDir);

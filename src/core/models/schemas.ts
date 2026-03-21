@@ -357,6 +357,7 @@ export const ParallelSubMovementRawSchema = z.object({
   /** Quality gates for this movement (AI directives) */
   quality_gates: QualityGatesSchema,
   pass_previous_response: z.boolean().optional().default(true),
+  timeout_ms: z.number().int().positive().optional(),
 }).superRefine((data, ctx) => {
   validatePieceCallConstraints(data, ctx);
 });
@@ -404,6 +405,10 @@ export const PieceMovementRawSchema = z.object({
   pass_previous_response: z.boolean().optional().default(true),
   /** Sub-movements to execute in parallel */
   parallel: z.array(ParallelSubMovementRawSchema).optional(),
+  /** Parallel execution configuration (timeout defaults) */
+  parallel_config: z.object({
+    timeout_ms: z.number().int().positive().optional().default(1800000),
+  }).optional(),
   /** Arpeggio configuration for data-driven batch processing */
   arpeggio: ArpeggioConfigRawSchema.optional(),
   /** Team leader configuration for dynamic part decomposition */
@@ -413,6 +418,12 @@ export const PieceMovementRawSchema = z.object({
   {
     message: "'parallel', 'arpeggio', and 'team_leader' are mutually exclusive",
     path: ['parallel'],
+  },
+).refine(
+  (data) => data.parallel_config == null || (data.parallel != null && data.parallel.length > 0),
+  {
+    message: "'parallel_config' requires 'parallel'",
+    path: ['parallel_config'],
   },
 ).superRefine((data, ctx) => {
   validatePieceCallConstraints(data, ctx, ['parallel', 'arpeggio', 'team_leader']);

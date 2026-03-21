@@ -50,6 +50,7 @@ export class PieceCallRunner {
     task: string,
     parentMaxMovements: number,
     slotOverrides?: PieceCallSlotOverrides,
+    abortSignal?: AbortSignal,
   ): Promise<{ response: AgentResponse; instruction: string }> {
     const callTarget = step.call;
     if (!callTarget) {
@@ -97,6 +98,7 @@ export class PieceCallRunner {
 
     const childOptions: PieceEngineOptions = {
       ...this.deps.engineOptions,
+      ...(abortSignal && { abortSignal }),
       callStack: [...callStack, state.pieceName],
       nestingDepth: nestingDepth + 1,
       initialPreviousResponse: slotOverrides?.initialPreviousResponse ?? state.lastOutput,

@@ -26,6 +26,7 @@ import type { ParallelLoggerOptions } from './parallel-logger.js';
 import type { PieceCallRunner } from './PieceCallRunner.js';
 import { cleanupParallelWorktree } from './parallel-worktree.js';
 import { prepareSlotContext } from './slot-context.js';
+import { buildAbortSignal } from './abort-signal.js';
 
 const log = createLogger('parallel-runner');
 
@@ -98,6 +99,7 @@ export class ParallelRunner {
       throw new Error(`Movement "${step.name}" has no parallel sub-movements`);
     }
     const subMovements = step.parallel;
+    const defaultTimeoutMs = step.parallelConfig?.timeoutMs ?? 1_800_000;
     const movementIteration = incrementMovementIteration(state, step.name);
     log.debug('Running parallel movement', {
       movement: step.name,
@@ -130,31 +132,37 @@ export class ParallelRunner {
           incrementMovementIteration(state, subMovement.name);
           const slotOverrides = slotContext?.overrides.get(subMovement.name);
           const worktreeInfo = slotContext?.worktrees.get(subMovement.name);
+          const timeoutMs = subMovement.timeoutMs ?? defaultTimeoutMs;
+          const { signal, dispose } = buildAbortSignal(timeoutMs, this.deps.engineOptions.abortSignal);
           let shouldMerge = false;
           try {
-            const { response, instruction: subInstruction } = await this.deps.pieceCallRunner.runPieceCallMovement(
-              subMovement, state, task, maxMovements, slotOverrides,
-            );
-
-            const match = await resolveMatchFromResponse(subMovement, response, ruleCtx);
-            const matchedCondition = match ? subMovement.rules?.[match.index]?.condition : undefined;
-            shouldMerge = matchedCondition !== 'ABORT';
-
-            const finalResponse: AgentResponse = match
-              ? { ...response, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
-              : response;
-
-            state.movementOutputs.set(subMovement.name, finalResponse);
-            return { subMovement, response: finalResponse, instruction: subInstruction };
-          } finally {
-            if (worktreeInfo) {
-              await cleanupParallelWorktree(
-                worktreeInfo.path,
-                this.deps.getCwd(),
-                shouldMerge,
-                slotOverrides?.initialPreviousResponse?.content,
+            try {
+              const { response, instruction: subInstruction } = await this.deps.pieceCallRunner.runPieceCallMovement(
+                subMovement, state, task, maxMovements, slotOverrides, signal,
               );
+
+              const match = await resolveMatchFromResponse(subMovement, response, ruleCtx);
+              const matchedCondition = match ? subMovement.rules?.[match.index]?.condition : undefined;
+              shouldMerge = matchedCondition !== 'ABORT';
+
+              const finalResponse: AgentResponse = match
+                ? { ...response, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
+                : response;
+
+              state.movementOutputs.set(subMovement.name, finalResponse);
+              return { subMovement, response: finalResponse, instruction: subInstruction };
+            } finally {
+              if (worktreeInfo) {
+                await cleanupParallelWorktree(
+                  worktreeInfo.path,
+                  this.deps.getCwd(),
+                  shouldMerge,
+                  slotOverrides?.initialPreviousResponse?.content,
+                );
+              }
             }
+          } finally {
+            dispose();
           }
         }
 
@@ -169,66 +177,72 @@ export class ParallelRunner {
 
         // Phase 1: main execution (Write excluded if sub-movement has report)
         const baseOptions = this.deps.optionsBuilder.buildAgentOptions(subMovement);
-        let didEmitPhaseStart = false;
-
-        // Override onStream with parallel logger's prefixed handler (immutable)
-        const agentOptions = parallelLogger
-          ? { ...baseOptions, onStream: parallelLogger.createStreamHandler(subMovement.name, index) }
-          : { ...baseOptions };
-        agentOptions.onPromptResolved = (promptParts: PhasePromptParts) => {
-          this.deps.onPhaseStart?.(subMovement, 1, 'execute', subInstruction, promptParts, undefined, parentIteration);
-          didEmitPhaseStart = true;
-        };
-        const subResponse = await executeAgent(subMovement.persona, subInstruction, agentOptions);
-        if (!didEmitPhaseStart) {
-          throw new Error(`Missing prompt parts for phase start: ${subMovement.name}:1`);
-        }
-        updatePersonaSession(subSessionKey, subResponse.sessionId);
-        this.deps.onPhaseComplete?.(subMovement, 1, 'execute', subResponse.content, subResponse.status, subResponse.error, undefined, parentIteration);
-
-        // Phase 2/3 context — no overrides needed, phase-runner uses buildSessionKey internally
-        const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(
-          state,
-          subResponse.content,
-          updatePersonaSession,
-          this.deps.onPhaseStart,
-          this.deps.onPhaseComplete,
-          this.deps.onJudgeStage,
-          parentIteration,
-        );
-
-        // Phase 2: report output for sub-movement
-        if (subMovement.outputContracts && subMovement.outputContracts.length > 0) {
-          await runReportPhase(subMovement, subIteration, phaseCtx);
-        }
-
-        // Phase 3: status judgment for sub-movement
-        let subPhase3: StatusJudgmentPhaseResult | undefined;
+        const timeoutMs = subMovement.timeoutMs ?? defaultTimeoutMs;
+        const { signal, dispose } = buildAbortSignal(timeoutMs, baseOptions.abortSignal);
         try {
-          subPhase3 = needsStatusJudgmentPhase(subMovement)
-            ? await runStatusJudgmentPhase(subMovement, phaseCtx)
-            : undefined;
-        } catch (error) {
-          log.info('Phase 3 status judgment failed for sub-movement, falling back to phase1 rule evaluation', {
-            movement: subMovement.name,
-            error: getErrorMessage(error),
-          });
+          let didEmitPhaseStart = false;
+
+          // Override onStream with parallel logger's prefixed handler (immutable)
+          const agentOptions = parallelLogger
+            ? { ...baseOptions, abortSignal: signal, onStream: parallelLogger.createStreamHandler(subMovement.name, index) }
+            : { ...baseOptions, abortSignal: signal };
+          agentOptions.onPromptResolved = (promptParts: PhasePromptParts) => {
+            this.deps.onPhaseStart?.(subMovement, 1, 'execute', subInstruction, promptParts, undefined, parentIteration);
+            didEmitPhaseStart = true;
+          };
+          const subResponse = await executeAgent(subMovement.persona, subInstruction, agentOptions);
+          if (!didEmitPhaseStart) {
+            throw new Error(`Missing prompt parts for phase start: ${subMovement.name}:1`);
+          }
+          updatePersonaSession(subSessionKey, subResponse.sessionId);
+          this.deps.onPhaseComplete?.(subMovement, 1, 'execute', subResponse.content, subResponse.status, subResponse.error, undefined, parentIteration);
+
+          // Phase 2/3 context — no overrides needed, phase-runner uses buildSessionKey internally
+          const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(
+            state,
+            subResponse.content,
+            updatePersonaSession,
+            this.deps.onPhaseStart,
+            this.deps.onPhaseComplete,
+            this.deps.onJudgeStage,
+            parentIteration,
+          );
+
+          // Phase 2: report output for sub-movement
+          if (subMovement.outputContracts && subMovement.outputContracts.length > 0) {
+            await runReportPhase(subMovement, subIteration, phaseCtx);
+          }
+
+          // Phase 3: status judgment for sub-movement
+          let subPhase3: StatusJudgmentPhaseResult | undefined;
+          try {
+            subPhase3 = needsStatusJudgmentPhase(subMovement)
+              ? await runStatusJudgmentPhase(subMovement, phaseCtx)
+              : undefined;
+          } catch (error) {
+            log.info('Phase 3 status judgment failed for sub-movement, falling back to phase1 rule evaluation', {
+              movement: subMovement.name,
+              error: getErrorMessage(error),
+            });
+          }
+
+          let finalResponse: AgentResponse;
+          if (subPhase3) {
+            finalResponse = { ...subResponse, matchedRuleIndex: subPhase3.ruleIndex, matchedRuleMethod: subPhase3.method };
+          } else {
+            const match = await detectMatchedRule(subMovement, subResponse.content, '', ruleCtx);
+            finalResponse = match
+              ? { ...subResponse, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
+              : subResponse;
+          }
+
+          state.movementOutputs.set(subMovement.name, finalResponse);
+          this.deps.movementExecutor.emitMovementReports(subMovement);
+
+          return { subMovement, response: finalResponse, instruction: subInstruction };
+        } finally {
+          dispose();
         }
-
-        let finalResponse: AgentResponse;
-        if (subPhase3) {
-          finalResponse = { ...subResponse, matchedRuleIndex: subPhase3.ruleIndex, matchedRuleMethod: subPhase3.method };
-        } else {
-          const match = await detectMatchedRule(subMovement, subResponse.content, '', ruleCtx);
-          finalResponse = match
-            ? { ...subResponse, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
-            : subResponse;
-        }
-
-        state.movementOutputs.set(subMovement.name, finalResponse);
-        this.deps.movementExecutor.emitMovementReports(subMovement);
-
-        return { subMovement, response: finalResponse, instruction: subInstruction };
       }),
     );
 
