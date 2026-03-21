@@ -2,6 +2,10 @@ name: roadmap
 description: ロードマップ実行ピース（タスク分解 → 2並列piece_call → バッチループ）
 max_movements: 200
 initial_movement: decompose
+personas:
+  decomposition-dependency-reviewer: ../facets/personas/decomposition-dependency-reviewer.md
+  decomposition-granularity-reviewer: ../facets/personas/decomposition-granularity-reviewer.md
+  decomposition-coverage-reviewer: ../facets/personas/decomposition-coverage-reviewer.md
 movements:
   - name: decompose
     persona: planner
@@ -11,13 +15,17 @@ movements:
 
       **手順:**
       1. {report:roadmap-tasks.md} が存在する場合は Read ツールで読み、既完了タスクとリトライ回数を把握する
-      2. previous_response に `## Slot Results` セクションが含まれている場合（失敗スロットのリトライフロー）:
+      2. previous_response にレビューフィードバック（review_decomposition からの差し戻し）が含まれている場合:
+         - フィードバックの指摘事項を踏まえてタスク分割を再検討・修正する
+         - roadmap-tasks.md の「レビュー差し戻し回数」をインクリメントする
+         - レビュー差し戻し回数が3回を超えた場合は「要件不明」（ABORT）として遷移する
+      3. previous_response に `## Slot Results` セクションが含まれている場合（失敗スロットのリトライフロー）:
          - 失敗（ABORT/ERROR）したスロットのタスクを特定する
          - 該当タスクを slot_1 / slot_2 に再割り当てする
          - roadmap-tasks.md の該当タスクのリトライ回数をインクリメントする
-      3. 通常フロー: ロードマップから独立実行可能なタスクを洗い出す
-      4. 未完了タスクから最大2件を選び、slot_1 / slot_2 に割り当てる
-      5. 2件未満の場合、不要なスロットには「タスクなし」と明記する
+      4. 通常フロー: ロードマップから独立実行可能なタスクを洗い出す
+      5. 未完了タスクから最大2件を選び、slot_1 / slot_2 に割り当てる
+      6. 2件未満の場合、不要なスロットには「タスクなし」と明記する
 
       **出力形式:**
       各スロットのタスク指示は、子ピースが単独で実行できるだけの十分な情報を含めてください:
@@ -37,22 +45,74 @@ movements:
           format: plan
     rules:
       - condition: 分解完了
-        next: execute_batch
+        next: review_decomposition
       - condition: タスクなし
         next: COMPLETE
       - condition: 要件不明
         next: ABORT
+  - name: review_decomposition
+    parallel:
+      - name: dependency-review
+        persona: decomposition-dependency-reviewer
+        edit: false
+        instruction: |
+          previous_response を受け取り、タスク分割の依存関係・実行順序を検証してください。
+
+          **検証観点:**
+          - タスク間に暗黙の依存関係が見落とされていないか
+          - 実行順序が依存関係に矛盾していないか
+          - 並列実行可能なタスクが直列に配置されていないか
+
+          問題なければ approved、問題があれば needs_fix（具体的問題点と修正案を明記）。
+        rules:
+          - condition: approved
+          - condition: needs_fix
+      - name: granularity-review
+        persona: decomposition-granularity-reviewer
+        edit: false
+        instruction: |
+          previous_response を受け取り、タスクの粒度・スコープを検証してください。
+
+          **検証観点:**
+          - タスクが大きすぎて1回の実行で完了困難ではないか
+          - タスクが小さすぎて不必要に分割されていないか
+          - 各タスクのスコープが明確に定義されているか
+
+          問題なければ approved、問題があれば needs_fix（具体的問題点と修正案を明記）。
+        rules:
+          - condition: approved
+          - condition: needs_fix
+      - name: coverage-review
+        persona: decomposition-coverage-reviewer
+        edit: false
+        instruction: |
+          previous_response を受け取り、元のロードマップ要件の網羅性を検証してください。
+
+          **検証観点:**
+          - 元のロードマップの全要件が分割後のタスクでカバーされているか
+          - 漏れている要件や機能がないか
+          - 余分なタスク（元の要件にないもの）が含まれていないか
+
+          問題なければ approved、問題があれば needs_fix（具体的問題点と修正案を明記）。
+        rules:
+          - condition: approved
+          - condition: needs_fix
+    rules:
+      - condition: all("approved")
+        next: execute_batch
+      - condition: any("needs_fix")
+        next: decompose
   - name: execute_batch
     parallel:
       - name: slot_1
         kind: piece_call
-        call: default
+        call: takt-default
         rules:
           - condition: COMPLETE
           - condition: ABORT
       - name: slot_2
         kind: piece_call
-        call: default
+        call: takt-default
         rules:
           - condition: COMPLETE
           - condition: ABORT

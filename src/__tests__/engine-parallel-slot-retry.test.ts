@@ -373,15 +373,19 @@ describe('roadmap piece retry: builtin loading validation', () => {
     }
   });
 
-  it('should maintain decompose → execute_batch → check_remaining loop', () => {
+  it('should maintain decompose → review_decomposition → execute_batch → check_remaining loop', () => {
     // Given: builtin roadmap piece
     const config = loadPiece('roadmap', testDir);
 
-    // When/Then: basic loop structure is preserved
+    // When/Then: full loop structure is preserved (with review gate)
     expect(config).not.toBeNull();
 
     const decompose = config!.movements.find(m => m.name === 'decompose');
-    const executeBatchRule = decompose!.rules?.find(r => r.next === 'execute_batch');
+    const reviewRule = decompose!.rules?.find(r => r.next === 'review_decomposition');
+    expect(reviewRule).toBeDefined();
+
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    const executeBatchRule = reviewDecomp!.rules?.find(r => r.next === 'execute_batch');
     expect(executeBatchRule).toBeDefined();
 
     const executeBatch = config!.movements.find(m => m.name === 'execute_batch');

@@ -2,9 +2,12 @@
  * Tests for roadmap piece YAML validation and integration.
  *
  * Covers:
- * - Schema validation of roadmap.yaml structure (3 movements: decompose, execute_batch, check_remaining)
+ * - Schema validation of roadmap.yaml structure (4 movements: decompose, review_decomposition, execute_batch, check_remaining)
+ * - review_decomposition parallel movement with 3 reviewer sub-movements
  * - parallel movement with 2 piece_call sub-movements validates against PieceConfigRawSchema
  * - piece_call constraints respected (no persona/instruction/edit on piece_call slots)
+ * - decompose → review_decomposition → execute_batch / decompose transition rules
+ * - personas section map with 3 decomposition reviewer personas
  * - piece-categories.yaml includes roadmap in 「その他」 category
  * - Integration: roadmap piece loads via pieceLoader
  */
@@ -19,7 +22,7 @@ import { PieceConfigRawSchema, PieceMovementRawSchema, ParallelSubMovementRawSch
 
 /**
  * Builds the raw YAML-equivalent object for the roadmap piece.
- * This mirrors the planned roadmap.yaml structure from the plan report.
+ * This mirrors the planned roadmap.yaml structure including review_decomposition.
  */
 function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -27,6 +30,11 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
     description: 'ロードマップ実行ピース（タスク分解 → 2並列piece_call → バッチループ）',
     max_movements: 200,
     initial_movement: 'decompose',
+    personas: {
+      'decomposition-dependency-reviewer': '../facets/personas/decomposition-dependency-reviewer.md',
+      'decomposition-granularity-reviewer': '../facets/personas/decomposition-granularity-reviewer.md',
+      'decomposition-coverage-reviewer': '../facets/personas/decomposition-coverage-reviewer.md',
+    },
     movements: [
       {
         name: 'decompose',
@@ -39,9 +47,48 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
           ],
         },
         rules: [
-          { condition: '分解完了', next: 'execute_batch' },
+          { condition: '分解完了', next: 'review_decomposition' },
           { condition: 'タスクなし', next: 'COMPLETE' },
           { condition: '要件不明', next: 'ABORT' },
+        ],
+      },
+      {
+        name: 'review_decomposition',
+        parallel: [
+          {
+            name: 'dependency-review',
+            persona: 'decomposition-dependency-reviewer',
+            edit: false,
+            instruction: 'Review task decomposition for dependency and execution order issues.',
+            rules: [
+              { condition: 'approved' },
+              { condition: 'needs_fix' },
+            ],
+          },
+          {
+            name: 'granularity-review',
+            persona: 'decomposition-granularity-reviewer',
+            edit: false,
+            instruction: 'Review task decomposition for granularity and scope issues.',
+            rules: [
+              { condition: 'approved' },
+              { condition: 'needs_fix' },
+            ],
+          },
+          {
+            name: 'coverage-review',
+            persona: 'decomposition-coverage-reviewer',
+            edit: false,
+            instruction: 'Review task decomposition for requirements coverage.',
+            rules: [
+              { condition: 'approved' },
+              { condition: 'needs_fix' },
+            ],
+          },
+        ],
+        rules: [
+          { condition: 'all("approved")', next: 'execute_batch' },
+          { condition: 'any("needs_fix")', next: 'decompose' },
         ],
       },
       {
@@ -77,8 +124,10 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
         edit: false,
         instruction: 'Check remaining tasks from {report:roadmap-tasks.md}.',
         rules: [
+          { condition: '失敗スロットあり', next: 'decompose' },
           { condition: '残りタスクあり', next: 'decompose' },
           { condition: '全タスク完了', next: 'COMPLETE' },
+          { condition: 'リトライ上限到達', next: 'COMPLETE' },
         ],
       },
     ],
@@ -132,14 +181,29 @@ describe('roadmap piece: PieceConfigRawSchema validation', () => {
     }
   });
 
-  it('should have exactly 3 movements', () => {
+  it('should have exactly 4 movements', () => {
     const raw = makeRoadmapPieceRaw();
 
     const result = PieceConfigRawSchema.safeParse(raw);
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.movements).toHaveLength(3);
+      expect(result.data.movements).toHaveLength(4);
+    }
+  });
+
+  it('should accept roadmap piece with personas section map', () => {
+    const raw = makeRoadmapPieceRaw();
+
+    const result = PieceConfigRawSchema.safeParse(raw);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.personas).toBeDefined();
+      expect(Object.keys(result.data.personas!)).toHaveLength(3);
+      expect(result.data.personas!['decomposition-dependency-reviewer']).toBeDefined();
+      expect(result.data.personas!['decomposition-granularity-reviewer']).toBeDefined();
+      expect(result.data.personas!['decomposition-coverage-reviewer']).toBeDefined();
     }
   });
 });
@@ -154,7 +218,7 @@ describe('roadmap piece: decompose movement', () => {
       edit: false,
       instruction: 'Decompose the roadmap into individual tasks.',
       rules: [
-        { condition: '分解完了', next: 'execute_batch' },
+        { condition: '分解完了', next: 'review_decomposition' },
         { condition: 'タスクなし', next: 'COMPLETE' },
         { condition: '要件不明', next: 'ABORT' },
       ],
@@ -177,7 +241,7 @@ describe('roadmap piece: decompose movement', () => {
         ],
       },
       rules: [
-        { condition: '分解完了', next: 'execute_batch' },
+        { condition: '分解完了', next: 'review_decomposition' },
       ],
     };
 
@@ -186,14 +250,14 @@ describe('roadmap piece: decompose movement', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should have 3 rules: 分解完了, タスクなし, 要件不明', () => {
+  it('should have 分解完了 rule transitioning to review_decomposition', () => {
     const decompose = {
       name: 'decompose',
       persona: 'planner',
       edit: false,
       instruction: 'Decompose the roadmap.',
       rules: [
-        { condition: '分解完了', next: 'execute_batch' },
+        { condition: '分解完了', next: 'review_decomposition' },
         { condition: 'タスクなし', next: 'COMPLETE' },
         { condition: '要件不明', next: 'ABORT' },
       ],
@@ -204,6 +268,203 @@ describe('roadmap piece: decompose movement', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.rules).toHaveLength(3);
+      const decomposeRule = result.data.rules?.find(r => r.condition === '分解完了');
+      expect(decomposeRule).toBeDefined();
+      expect(decomposeRule!.next).toBe('review_decomposition');
+    }
+  });
+});
+
+// ─── Schema validation: review_decomposition movement (parallel reviewers) ───
+
+describe('roadmap piece: review_decomposition movement', () => {
+  it('should accept review_decomposition with 3 parallel reviewer sub-movements', () => {
+    const reviewDecomposition = {
+      name: 'review_decomposition',
+      parallel: [
+        {
+          name: 'dependency-review',
+          persona: 'decomposition-dependency-reviewer',
+          edit: false,
+          instruction: 'Review dependencies.',
+          rules: [
+            { condition: 'approved' },
+            { condition: 'needs_fix' },
+          ],
+        },
+        {
+          name: 'granularity-review',
+          persona: 'decomposition-granularity-reviewer',
+          edit: false,
+          instruction: 'Review granularity.',
+          rules: [
+            { condition: 'approved' },
+            { condition: 'needs_fix' },
+          ],
+        },
+        {
+          name: 'coverage-review',
+          persona: 'decomposition-coverage-reviewer',
+          edit: false,
+          instruction: 'Review coverage.',
+          rules: [
+            { condition: 'approved' },
+            { condition: 'needs_fix' },
+          ],
+        },
+      ],
+      rules: [
+        { condition: 'all("approved")', next: 'execute_batch' },
+        { condition: 'any("needs_fix")', next: 'decompose' },
+      ],
+    };
+
+    const result = PieceMovementRawSchema.safeParse(reviewDecomposition);
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should have aggregate rule all("approved") routing to execute_batch', () => {
+    const reviewDecomposition = {
+      name: 'review_decomposition',
+      parallel: [
+        {
+          name: 'dependency-review',
+          persona: 'decomposition-dependency-reviewer',
+          edit: false,
+          instruction: 'Review.',
+          rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+        },
+      ],
+      rules: [
+        { condition: 'all("approved")', next: 'execute_batch' },
+        { condition: 'any("needs_fix")', next: 'decompose' },
+      ],
+    };
+
+    const result = PieceMovementRawSchema.safeParse(reviewDecomposition);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const allApprovedRule = result.data.rules?.find(r => r.condition === 'all("approved")');
+      expect(allApprovedRule).toBeDefined();
+      expect(allApprovedRule!.next).toBe('execute_batch');
+    }
+  });
+
+  it('should have aggregate rule any("needs_fix") routing back to decompose', () => {
+    const reviewDecomposition = {
+      name: 'review_decomposition',
+      parallel: [
+        {
+          name: 'dependency-review',
+          persona: 'decomposition-dependency-reviewer',
+          edit: false,
+          instruction: 'Review.',
+          rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+        },
+      ],
+      rules: [
+        { condition: 'all("approved")', next: 'execute_batch' },
+        { condition: 'any("needs_fix")', next: 'decompose' },
+      ],
+    };
+
+    const result = PieceMovementRawSchema.safeParse(reviewDecomposition);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const needsFixRule = result.data.rules?.find(r => r.condition === 'any("needs_fix")');
+      expect(needsFixRule).toBeDefined();
+      expect(needsFixRule!.next).toBe('decompose');
+    }
+  });
+
+  it('should have each reviewer sub-movement with edit: false', () => {
+    const subMovements = [
+      {
+        name: 'dependency-review',
+        persona: 'decomposition-dependency-reviewer',
+        edit: false,
+        instruction: 'Review dependencies.',
+        rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+      },
+      {
+        name: 'granularity-review',
+        persona: 'decomposition-granularity-reviewer',
+        edit: false,
+        instruction: 'Review granularity.',
+        rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+      },
+      {
+        name: 'coverage-review',
+        persona: 'decomposition-coverage-reviewer',
+        edit: false,
+        instruction: 'Review coverage.',
+        rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+      },
+    ];
+
+    for (const sub of subMovements) {
+      const result = ParallelSubMovementRawSchema.safeParse(sub);
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.edit).toBe(false);
+      }
+    }
+  });
+
+  it('should have each reviewer sub-movement with a dedicated persona', () => {
+    const subMovements = [
+      {
+        name: 'dependency-review',
+        persona: 'decomposition-dependency-reviewer',
+        edit: false,
+        instruction: 'Review.',
+        rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+      },
+      {
+        name: 'granularity-review',
+        persona: 'decomposition-granularity-reviewer',
+        edit: false,
+        instruction: 'Review.',
+        rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+      },
+      {
+        name: 'coverage-review',
+        persona: 'decomposition-coverage-reviewer',
+        edit: false,
+        instruction: 'Review.',
+        rules: [{ condition: 'approved' }, { condition: 'needs_fix' }],
+      },
+    ];
+
+    const personas = subMovements.map(s => s.persona);
+    const uniquePersonas = new Set(personas);
+    expect(uniquePersonas.size).toBe(3);
+  });
+
+  it('should have each reviewer sub-movement with approved and needs_fix rules', () => {
+    const sub = {
+      name: 'dependency-review',
+      persona: 'decomposition-dependency-reviewer',
+      edit: false,
+      instruction: 'Review.',
+      rules: [
+        { condition: 'approved' },
+        { condition: 'needs_fix' },
+      ],
+    };
+
+    const result = ParallelSubMovementRawSchema.safeParse(sub);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.rules).toHaveLength(2);
+      const conditions = result.data.rules!.map(r => r.condition);
+      expect(conditions).toContain('approved');
+      expect(conditions).toContain('needs_fix');
     }
   });
 });
@@ -328,32 +589,17 @@ describe('roadmap piece: piece_call constraints in parallel slots', () => {
 // ─── Schema validation: check_remaining movement ───
 
 describe('roadmap piece: check_remaining movement', () => {
-  it('should accept check_remaining as an agent movement', () => {
+  it('should accept check_remaining as an agent movement with 4 rules', () => {
     const checkRemaining = {
       name: 'check_remaining',
       persona: 'planner',
       edit: false,
       instruction: 'Check remaining tasks.',
       rules: [
+        { condition: '失敗スロットあり', next: 'decompose' },
         { condition: '残りタスクあり', next: 'decompose' },
         { condition: '全タスク完了', next: 'COMPLETE' },
-      ],
-    };
-
-    const result = PieceMovementRawSchema.safeParse(checkRemaining);
-
-    expect(result.success).toBe(true);
-  });
-
-  it('should have rule routing back to decompose for remaining tasks', () => {
-    const checkRemaining = {
-      name: 'check_remaining',
-      persona: 'planner',
-      edit: false,
-      instruction: 'Check remaining tasks.',
-      rules: [
-        { condition: '残りタスクあり', next: 'decompose' },
-        { condition: '全タスク完了', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'COMPLETE' },
       ],
     };
 
@@ -361,8 +607,33 @@ describe('roadmap piece: check_remaining movement', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      const loopBackRule = result.data.rules?.find(r => r.next === 'decompose');
-      expect(loopBackRule).toBeDefined();
+      expect(result.data.rules).toHaveLength(4);
+    }
+  });
+
+  it('should have rules routing back to decompose for failed slots and remaining tasks', () => {
+    const checkRemaining = {
+      name: 'check_remaining',
+      persona: 'planner',
+      edit: false,
+      instruction: 'Check remaining tasks.',
+      rules: [
+        { condition: '失敗スロットあり', next: 'decompose' },
+        { condition: '残りタスクあり', next: 'decompose' },
+        { condition: '全タスク完了', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'COMPLETE' },
+      ],
+    };
+
+    const result = PieceMovementRawSchema.safeParse(checkRemaining);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const decomposeRules = result.data.rules?.filter(r => r.next === 'decompose');
+      expect(decomposeRules).toHaveLength(2);
+
+      const completeRules = result.data.rules?.filter(r => r.next === 'COMPLETE');
+      expect(completeRules).toHaveLength(2);
     }
   });
 });
@@ -488,12 +759,12 @@ describe('roadmap piece: builtin loading', () => {
     expect(config!.maxMovements).toBe(200);
   });
 
-  it('should have exactly 3 movements: decompose, execute_batch, check_remaining', () => {
+  it('should have exactly 4 movements: decompose, review_decomposition, execute_batch, check_remaining', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
     const movementNames = config!.movements.map(m => m.name);
-    expect(movementNames).toEqual(['decompose', 'execute_batch', 'check_remaining']);
+    expect(movementNames).toEqual(['decompose', 'review_decomposition', 'execute_batch', 'check_remaining']);
   });
 
   it('should have decompose movement with edit: false', () => {
@@ -556,7 +827,7 @@ describe('roadmap piece: builtin loading', () => {
     expect(anyRule).toBeDefined();
   });
 
-  it('should have check_remaining with rule routing back to decompose', () => {
+  it('should have check_remaining with rules routing back to decompose and to COMPLETE', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
@@ -564,11 +835,87 @@ describe('roadmap piece: builtin loading', () => {
     expect(checkRemaining).toBeDefined();
     expect(checkRemaining!.rules).toBeDefined();
 
-    const loopBackRule = checkRemaining!.rules!.find(r => r.next === 'decompose');
-    expect(loopBackRule).toBeDefined();
+    const decomposeRules = checkRemaining!.rules!.filter(r => r.next === 'decompose');
+    expect(decomposeRules.length).toBeGreaterThanOrEqual(2);
 
-    const completeRule = checkRemaining!.rules!.find(r => r.next === 'COMPLETE');
-    expect(completeRule).toBeDefined();
+    const completeRules = checkRemaining!.rules!.filter(r => r.next === 'COMPLETE');
+    expect(completeRules.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should have decompose rule 分解完了 routing to review_decomposition', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const decompose = config!.movements.find(m => m.name === 'decompose');
+    expect(decompose).toBeDefined();
+
+    const decomposeCompleteRule = decompose!.rules!.find(r => r.condition === '分解完了');
+    expect(decomposeCompleteRule).toBeDefined();
+    expect(decomposeCompleteRule!.next).toBe('review_decomposition');
+  });
+
+  it('should have review_decomposition as a parallel movement with 3 reviewer sub-movements', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+    expect(reviewDecomp!.parallel).toBeDefined();
+    expect(reviewDecomp!.parallel).toHaveLength(3);
+
+    const subNames = reviewDecomp!.parallel!.map(s => s.name);
+    expect(subNames).toContain('dependency-review');
+    expect(subNames).toContain('granularity-review');
+    expect(subNames).toContain('coverage-review');
+  });
+
+  it('should have review_decomposition sub-movements with edit: false', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+
+    for (const sub of reviewDecomp!.parallel!) {
+      expect(sub.edit).toBe(false);
+    }
+  });
+
+  it('should have review_decomposition sub-movements with dedicated personas', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+
+    // With personas section map, resolvePersona returns the map value (relative path) as personaSpec
+    const expectedPersonas = [
+      '../facets/personas/decomposition-dependency-reviewer.md',
+      '../facets/personas/decomposition-granularity-reviewer.md',
+      '../facets/personas/decomposition-coverage-reviewer.md',
+    ];
+
+    const actualPersonas = reviewDecomp!.parallel!.map(s => s.persona);
+    for (const expected of expectedPersonas) {
+      expect(actualPersonas).toContain(expected);
+    }
+  });
+
+  it('should have review_decomposition with aggregate rules for approved and needs_fix', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+    expect(reviewDecomp!.rules).toBeDefined();
+
+    const allApproved = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'all');
+    expect(allApproved).toBeDefined();
+    expect(allApproved!.next).toBe('execute_batch');
+
+    const anyNeedsFix = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'any');
+    expect(anyNeedsFix).toBeDefined();
+    expect(anyNeedsFix!.next).toBe('decompose');
   });
 
   it('should have execute_batch parallel slots named slot_1 and slot_2 only', () => {
@@ -622,6 +969,125 @@ describe('roadmap piece: category registration', () => {
     expect(categoryConfig).not.toBeNull();
     const allPieces = collectPiecesFromNodes(categoryConfig!.pieceCategories);
     expect(allPieces).toContain('roadmap');
+  });
+
+  it('should include roadmap in EN builtin categories', async () => {
+    languageState.value = 'en';
+    const { loadDefaultCategories } = await import('../infra/config/loaders/pieceCategories.js');
+
+    const categoryConfig = loadDefaultCategories(testDir);
+
+    expect(categoryConfig).not.toBeNull();
+    const allPieces = collectPiecesFromNodes(categoryConfig!.pieceCategories);
+    expect(allPieces).toContain('roadmap');
+  });
+});
+
+// ─── Integration: EN builtin piece loading ───
+
+describe('roadmap piece: EN builtin loading', () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = createTestDir();
+    languageState.value = 'en';
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('should load EN roadmap piece via loadPiece', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.name).toBe('roadmap');
+  });
+
+  it('should have exactly 4 movements in EN version', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const movementNames = config!.movements.map(m => m.name);
+    expect(movementNames).toEqual(['decompose', 'review_decomposition', 'execute_batch', 'check_remaining']);
+  });
+
+  it('should have review_decomposition as a parallel movement with 3 reviewer sub-movements in EN version', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+    expect(reviewDecomp!.parallel).toBeDefined();
+    expect(reviewDecomp!.parallel).toHaveLength(3);
+
+    const subNames = reviewDecomp!.parallel!.map(s => s.name);
+    expect(subNames).toContain('dependency-review');
+    expect(subNames).toContain('granularity-review');
+    expect(subNames).toContain('coverage-review');
+  });
+
+  it('should have EN decompose rule transitioning to review_decomposition', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const decompose = config!.movements.find(m => m.name === 'decompose');
+    expect(decompose).toBeDefined();
+
+    const decomposeCompleteRule = decompose!.rules!.find(r => r.condition === 'Decomposition complete');
+    expect(decomposeCompleteRule).toBeDefined();
+    expect(decomposeCompleteRule!.next).toBe('review_decomposition');
+  });
+
+  it('should have EN check_remaining with English condition strings', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const checkRemaining = config!.movements.find(m => m.name === 'check_remaining');
+    expect(checkRemaining).toBeDefined();
+    expect(checkRemaining!.rules).toBeDefined();
+
+    const conditions = checkRemaining!.rules!.map(r => r.condition);
+    expect(conditions).toContain('Failed slots exist');
+    expect(conditions).toContain('Remaining tasks exist');
+    expect(conditions).toContain('All tasks complete');
+    expect(conditions).toContain('Retry limit reached');
+  });
+
+  it('should have EN review_decomposition sub-movements with dedicated personas', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+
+    const expectedPersonas = [
+      '../facets/personas/decomposition-dependency-reviewer.md',
+      '../facets/personas/decomposition-granularity-reviewer.md',
+      '../facets/personas/decomposition-coverage-reviewer.md',
+    ];
+
+    const actualPersonas = reviewDecomp!.parallel!.map(s => s.persona);
+    for (const expected of expectedPersonas) {
+      expect(actualPersonas).toContain(expected);
+    }
+  });
+
+  it('should have EN review_decomposition with aggregate rules', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
+    expect(reviewDecomp).toBeDefined();
+    expect(reviewDecomp!.rules).toBeDefined();
+
+    const allApproved = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'all');
+    expect(allApproved).toBeDefined();
+    expect(allApproved!.next).toBe('execute_batch');
+
+    const anyNeedsFix = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'any');
+    expect(anyNeedsFix).toBeDefined();
+    expect(anyNeedsFix!.next).toBe('decompose');
   });
 });
 
