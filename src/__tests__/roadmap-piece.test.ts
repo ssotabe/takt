@@ -108,6 +108,9 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
       },
       {
         name: 'execute_batch',
+        parallel_config: {
+          timeout_ms: 7200000,
+        },
         parallel: [
           {
             name: 'slot_1',
@@ -142,7 +145,7 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
           { condition: '失敗スロットあり', next: 'assign_slots' },
           { condition: '残りタスクあり', next: 'assign_slots' },
           { condition: '全タスク完了', next: 'COMPLETE' },
-          { condition: 'リトライ上限到達', next: 'COMPLETE' },
+          { condition: 'リトライ上限到達', next: 'ABORT' },
         ],
       },
     ],
@@ -505,6 +508,31 @@ describe('roadmap piece: execute_batch movement', () => {
     expect(result.success).toBe(true);
   });
 
+  it('should accept execute_batch with parallel_config.timeout_ms', () => {
+    const executeBatch = {
+      name: 'execute_batch',
+      parallel_config: {
+        timeout_ms: 7200000,
+      },
+      parallel: [
+        makeParallelPieceCallSlot({ name: 'slot_1' }),
+        makeParallelPieceCallSlot({ name: 'slot_2' }),
+      ],
+      rules: [
+        { condition: 'all("COMPLETE")', next: 'check_remaining' },
+        { condition: 'any("ABORT")', next: 'check_remaining' },
+      ],
+    };
+
+    const result = PieceMovementRawSchema.safeParse(executeBatch);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.parallel_config).toBeDefined();
+      expect(result.data.parallel_config!.timeout_ms).toBe(7200000);
+    }
+  });
+
   it('should accept piece_call sub-movements calling takt-default', () => {
     const slot = makeParallelPieceCallSlot({ call: 'takt-default' });
 
@@ -614,7 +642,7 @@ describe('roadmap piece: check_remaining movement', () => {
         { condition: '失敗スロットあり', next: 'assign_slots' },
         { condition: '残りタスクあり', next: 'assign_slots' },
         { condition: '全タスク完了', next: 'COMPLETE' },
-        { condition: 'リトライ上限到達', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'ABORT' },
       ],
     };
 
@@ -636,7 +664,7 @@ describe('roadmap piece: check_remaining movement', () => {
         { condition: '失敗スロットあり', next: 'assign_slots' },
         { condition: '残りタスクあり', next: 'assign_slots' },
         { condition: '全タスク完了', next: 'COMPLETE' },
-        { condition: 'リトライ上限到達', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'ABORT' },
       ],
     };
 
@@ -648,7 +676,34 @@ describe('roadmap piece: check_remaining movement', () => {
       expect(assignSlotsRules).toHaveLength(2);
 
       const completeRules = result.data.rules?.filter(r => r.next === 'COMPLETE');
-      expect(completeRules).toHaveLength(2);
+      expect(completeRules).toHaveLength(1);
+
+      const abortRules = result.data.rules?.filter(r => r.next === 'ABORT');
+      expect(abortRules).toHaveLength(1);
+    }
+  });
+
+  it('should route リトライ上限到達 to ABORT instead of COMPLETE', () => {
+    const checkRemaining = {
+      name: 'check_remaining',
+      persona: 'planner',
+      edit: false,
+      instruction: 'Check remaining tasks.',
+      rules: [
+        { condition: '失敗スロットあり', next: 'assign_slots' },
+        { condition: '残りタスクあり', next: 'assign_slots' },
+        { condition: '全タスク完了', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'ABORT' },
+      ],
+    };
+
+    const result = PieceMovementRawSchema.safeParse(checkRemaining);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const retryLimitRule = result.data.rules?.find(r => r.condition === 'リトライ上限到達');
+      expect(retryLimitRule).toBeDefined();
+      expect(retryLimitRule!.next).toBe('ABORT');
     }
   });
 });
@@ -842,7 +897,7 @@ describe('roadmap piece: builtin loading', () => {
     expect(anyRule).toBeDefined();
   });
 
-  it('should have check_remaining with rules routing to assign_slots and to COMPLETE', () => {
+  it('should have check_remaining with rules routing to assign_slots, COMPLETE, and ABORT', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
@@ -854,7 +909,32 @@ describe('roadmap piece: builtin loading', () => {
     expect(assignSlotsRules.length).toBeGreaterThanOrEqual(2);
 
     const completeRules = checkRemaining!.rules!.filter(r => r.next === 'COMPLETE');
-    expect(completeRules.length).toBeGreaterThanOrEqual(2);
+    expect(completeRules).toHaveLength(1);
+
+    const abortRules = checkRemaining!.rules!.filter(r => r.next === 'ABORT');
+    expect(abortRules).toHaveLength(1);
+  });
+
+  it('should have check_remaining リトライ上限到達 rule routing to ABORT', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const checkRemaining = config!.movements.find(m => m.name === 'check_remaining');
+    expect(checkRemaining).toBeDefined();
+
+    const retryLimitRule = checkRemaining!.rules!.find(r => r.condition === 'リトライ上限到達');
+    expect(retryLimitRule).toBeDefined();
+    expect(retryLimitRule!.next).toBe('ABORT');
+  });
+
+  it('should have execute_batch with parallelConfig.timeoutMs of 7200000 (2 hours)', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const executeBatch = config!.movements.find(m => m.name === 'execute_batch');
+    expect(executeBatch).toBeDefined();
+    expect(executeBatch!.parallelConfig).toBeDefined();
+    expect(executeBatch!.parallelConfig!.timeoutMs).toBe(7200000);
   });
 
   it('should have decompose rule 分解完了 routing to review_decomposition', () => {
@@ -1067,6 +1147,28 @@ describe('roadmap piece: EN builtin loading', () => {
     expect(conditions).toContain('Remaining tasks exist');
     expect(conditions).toContain('All tasks complete');
     expect(conditions).toContain('Retry limit reached');
+  });
+
+  it('should have EN check_remaining Retry limit reached rule routing to ABORT', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const checkRemaining = config!.movements.find(m => m.name === 'check_remaining');
+    expect(checkRemaining).toBeDefined();
+
+    const retryLimitRule = checkRemaining!.rules!.find(r => r.condition === 'Retry limit reached');
+    expect(retryLimitRule).toBeDefined();
+    expect(retryLimitRule!.next).toBe('ABORT');
+  });
+
+  it('should have EN execute_batch with parallelConfig.timeoutMs of 7200000 (2 hours)', () => {
+    const config = loadPiece('roadmap', testDir);
+
+    expect(config).not.toBeNull();
+    const executeBatch = config!.movements.find(m => m.name === 'execute_batch');
+    expect(executeBatch).toBeDefined();
+    expect(executeBatch!.parallelConfig).toBeDefined();
+    expect(executeBatch!.parallelConfig!.timeoutMs).toBe(7200000);
   });
 
   it('should have EN review_decomposition sub-movements with dedicated personas', () => {

@@ -125,6 +125,8 @@ movements:
       - condition: No tasks
         next: COMPLETE
   - name: execute_batch
+    parallel_config:
+      timeout_ms: 7200000
     parallel:
       - name: slot_1
         kind: piece_call
@@ -172,4 +174,4 @@ movements:
       - condition: All tasks complete
         next: COMPLETE
       - condition: Retry limit reached
-        next: COMPLETE
+        next: ABORT

@@ -7,7 +7,7 @@
  * Covers:
  * - Schema: check_remaining accepts new retry-related rule conditions
  * - Schema: check_remaining rules include 失敗スロットあり → decompose
- * - Schema: check_remaining rules include リトライ上限到達 → COMPLETE
+ * - Schema: check_remaining rules include リトライ上限到達 → ABORT
  * - Schema: decompose movement structure unchanged for retry compatibility
  * - Aggregate: any("ABORT") correctly routes to check_remaining
  * - Non-regression: all("COMPLETE") still routes to check_remaining
@@ -89,7 +89,7 @@ function makeUpdatedRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Re
           { condition: '失敗スロットあり', next: 'decompose' },
           { condition: '残りタスクあり', next: 'decompose' },
           { condition: '全タスク完了', next: 'COMPLETE' },
-          { condition: 'リトライ上限到達', next: 'COMPLETE' },
+          { condition: 'リトライ上限到達', next: 'ABORT' },
         ],
       },
     ],
@@ -111,7 +111,7 @@ describe('roadmap piece retry: check_remaining schema validation', () => {
         { condition: '失敗スロットあり', next: 'decompose' },
         { condition: '残りタスクあり', next: 'decompose' },
         { condition: '全タスク完了', next: 'COMPLETE' },
-        { condition: 'リトライ上限到達', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'ABORT' },
       ],
     };
 
@@ -150,7 +150,7 @@ describe('roadmap piece retry: check_remaining schema validation', () => {
     }
   });
 
-  it('should route リトライ上限到達 to COMPLETE', () => {
+  it('should route リトライ上限到達 to ABORT', () => {
     // Given: check_remaining with retry limit rule
     const checkRemaining = {
       name: 'check_remaining',
@@ -158,7 +158,7 @@ describe('roadmap piece retry: check_remaining schema validation', () => {
       edit: false,
       instruction: 'Check retry limits.',
       rules: [
-        { condition: 'リトライ上限到達', next: 'COMPLETE' },
+        { condition: 'リトライ上限到達', next: 'ABORT' },
       ],
     };
 
@@ -170,7 +170,7 @@ describe('roadmap piece retry: check_remaining schema validation', () => {
     if (result.success) {
       const limitRule = result.data.rules?.find(r => r.condition === 'リトライ上限到達');
       expect(limitRule).toBeDefined();
-      expect(limitRule!.next).toBe('COMPLETE');
+      expect(limitRule!.next).toBe('ABORT');
     }
   });
 
@@ -339,7 +339,7 @@ describe('roadmap piece retry: builtin loading validation', () => {
 
     const retryLimitRule = checkRemaining!.rules?.find(r => r.condition === 'リトライ上限到達');
     expect(retryLimitRule).toBeDefined();
-    expect(retryLimitRule!.next).toBe('COMPLETE');
+    expect(retryLimitRule!.next).toBe('ABORT');
   });
 
   it('should load roadmap piece with check_remaining having output_contracts', () => {

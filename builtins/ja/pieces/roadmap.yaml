@@ -125,6 +125,8 @@ movements:
       - condition: タスクなし
         next: COMPLETE
   - name: execute_batch
+    parallel_config:
+      timeout_ms: 7200000
     parallel:
       - name: slot_1
         kind: piece_call
@@ -172,4 +174,4 @@ movements:
       - condition: 全タスク完了
         next: COMPLETE
       - condition: リトライ上限到達
-        next: COMPLETE
+        next: ABORT
