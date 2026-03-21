@@ -335,7 +335,7 @@ describe('roadmap piece retry: builtin loading validation', () => {
 
     const failedSlotRule = checkRemaining!.rules?.find(r => r.condition === '失敗スロットあり');
     expect(failedSlotRule).toBeDefined();
-    expect(failedSlotRule!.next).toBe('decompose');
+    expect(failedSlotRule!.next).toBe('assign_slots');
 
     const retryLimitRule = checkRemaining!.rules?.find(r => r.condition === 'リトライ上限到達');
     expect(retryLimitRule).toBeDefined();
@@ -373,7 +373,7 @@ describe('roadmap piece retry: builtin loading validation', () => {
     }
   });
 
-  it('should maintain decompose → review_decomposition → execute_batch → check_remaining loop', () => {
+  it('should maintain decompose → review_decomposition → assign_slots → execute_batch → check_remaining loop', () => {
     // Given: builtin roadmap piece
     const config = loadPiece('roadmap', testDir);
 
@@ -385,7 +385,11 @@ describe('roadmap piece retry: builtin loading validation', () => {
     expect(reviewRule).toBeDefined();
 
     const reviewDecomp = config!.movements.find(m => m.name === 'review_decomposition');
-    const executeBatchRule = reviewDecomp!.rules?.find(r => r.next === 'execute_batch');
+    const assignSlotsRule = reviewDecomp!.rules?.find(r => r.next === 'assign_slots');
+    expect(assignSlotsRule).toBeDefined();
+
+    const assignSlots = config!.movements.find(m => m.name === 'assign_slots');
+    const executeBatchRule = assignSlots!.rules?.find(r => r.next === 'execute_batch');
     expect(executeBatchRule).toBeDefined();
 
     const executeBatch = config!.movements.find(m => m.name === 'execute_batch');
@@ -393,7 +397,7 @@ describe('roadmap piece retry: builtin loading validation', () => {
     expect(checkRemainingRule).toBeDefined();
 
     const checkRemaining = config!.movements.find(m => m.name === 'check_remaining');
-    const decomposeRule = checkRemaining!.rules?.find(r => r.next === 'decompose');
-    expect(decomposeRule).toBeDefined();
+    const assignSlotsFromRemaining = checkRemaining!.rules?.find(r => r.next === 'assign_slots');
+    expect(assignSlotsFromRemaining).toBeDefined();
   });
 });

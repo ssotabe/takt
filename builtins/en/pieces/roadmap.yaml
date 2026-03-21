@@ -19,26 +19,10 @@ movements:
          - Revise the task decomposition based on the feedback
          - Increment the "review rejection count" in roadmap-tasks.md
          - If review rejection count exceeds 3, transition to "Requirements unclear" (ABORT)
-      3. If previous_response contains a `## Slot Results` section (failed slot retry flow):
-         - Identify tasks from failed (ABORT/ERROR) slots
-         - Reassign those tasks to slot_1 / slot_2
-         - Increment the retry count for those tasks in roadmap-tasks.md
-      4. Normal flow: identify independently executable tasks from the roadmap
-      5. Select up to 2 incomplete tasks and assign to slot_1 / slot_2
-      6. If fewer than 2, mark unused slots as "No task"
+      3. Normal flow: identify independently executable tasks from the roadmap
 
       **Output format:**
-      Each slot's task instructions must contain sufficient information for the child piece to execute independently:
-      - Background and purpose
-      - Implementation details
-      - Constraints and notes
-      - Verification method
-
-      ## slot_1
-      (Task instructions)
-
-      ## slot_2
-      (Task instructions or No task)
+      Output the task plan (slot assignment is not needed).
     output_contracts:
       report:
         - name: roadmap-tasks.md
@@ -99,9 +83,47 @@ movements:
           - condition: needs_fix
     rules:
       - condition: all("approved")
-        next: execute_batch
+        next: assign_slots
       - condition: any("needs_fix")
         next: decompose
+  - name: assign_slots
+    persona: planner
+    edit: false
+    instruction: |
+      Read {report:roadmap-tasks.md} and assign the next tasks to execute into slots.
+
+      **Steps:**
+      1. Read roadmap-tasks.md to check the full task list, statuses, and retry counts
+      2. If previous_response contains a `## Slot Results` section (post-batch execution flow):
+         - Identify tasks from failed (ABORT/ERROR) slots
+         - Reassign tasks whose retry count is below the limit (2)
+         - Skip tasks that have reached the retry limit and update their status to "Retry limit reached" in roadmap-tasks.md
+      3. Select up to 2 incomplete tasks and assign to slot_1 / slot_2
+         - If tasks have dependencies, only select tasks whose dependencies are already completed
+      4. If no tasks are available for assignment, transition to "No tasks"
+      5. If fewer than 2 tasks, mark unused slots as "No task"
+
+      **Output format:**
+      Each slot's task instructions must contain sufficient information for the child piece to execute independently:
+      - Background and purpose
+      - Implementation details
+      - Constraints and notes
+      - Verification method
+
+      ## slot_1
+      (Task instructions)
+
+      ## slot_2
+      (Task instructions or No task)
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: Execute batch
+        next: execute_batch
+      - condition: No tasks
+        next: COMPLETE
   - name: execute_batch
     parallel:
       - name: slot_1
@@ -144,9 +166,9 @@ movements:
           format: plan
     rules:
       - condition: Failed slots exist
-        next: decompose
+        next: assign_slots
       - condition: Remaining tasks exist
-        next: decompose
+        next: assign_slots
       - condition: All tasks complete
         next: COMPLETE
       - condition: Retry limit reached

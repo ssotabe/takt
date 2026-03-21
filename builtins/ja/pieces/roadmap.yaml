@@ -19,26 +19,10 @@ movements:
          - フィードバックの指摘事項を踏まえてタスク分割を再検討・修正する
          - roadmap-tasks.md の「レビュー差し戻し回数」をインクリメントする
          - レビュー差し戻し回数が3回を超えた場合は「要件不明」（ABORT）として遷移する
-      3. previous_response に `## Slot Results` セクションが含まれている場合（失敗スロットのリトライフロー）:
-         - 失敗（ABORT/ERROR）したスロットのタスクを特定する
-         - 該当タスクを slot_1 / slot_2 に再割り当てする
-         - roadmap-tasks.md の該当タスクのリトライ回数をインクリメントする
-      4. 通常フロー: ロードマップから独立実行可能なタスクを洗い出す
-      5. 未完了タスクから最大2件を選び、slot_1 / slot_2 に割り当てる
-      6. 2件未満の場合、不要なスロットには「タスクなし」と明記する
+      3. 通常フロー: ロードマップから独立実行可能なタスクを洗い出す
 
       **出力形式:**
-      各スロットのタスク指示は、子ピースが単独で実行できるだけの十分な情報を含めてください:
-      - 背景・目的
-      - 実装内容の詳細
-      - 制約・注意事項
-      - 確認方法
-
-      ## slot_1
-      （タスク指示）
-
-      ## slot_2
-      （タスク指示 or タスクなし）
+      タスク計画を出力してください（スロット割り当ては不要）。
     output_contracts:
       report:
         - name: roadmap-tasks.md
@@ -99,9 +83,47 @@ movements:
           - condition: needs_fix
     rules:
       - condition: all("approved")
-        next: execute_batch
+        next: assign_slots
       - condition: any("needs_fix")
         next: decompose
+  - name: assign_slots
+    persona: planner
+    edit: false
+    instruction: |
+      {report:roadmap-tasks.md} を読み、次に実行すべきタスクをスロットに割り当ててください。
+
+      **手順:**
+      1. roadmap-tasks.md を Read ツールで読み、全タスクの一覧・ステータス・リトライ回数を把握する
+      2. previous_response に `## Slot Results` セクションが含まれている場合（バッチ実行後のフロー）:
+         - 失敗（ABORT/ERROR）したスロットのタスクを特定する
+         - 該当タスクのリトライ回数が上限（2回）未満であれば再割り当て対象とする
+         - 上限に達したタスクはスキップし、roadmap-tasks.md のステータスを「リトライ上限」に更新する
+      3. 未完了タスクから最大2件を選び、slot_1 / slot_2 に割り当てる
+         - 依存関係がある場合は、依存先が完了済みのタスクのみ選択する
+      4. 割り当て可能なタスクがない場合は「タスクなし」として遷移する
+      5. 2件未満の場合、不要なスロットには「タスクなし」と明記する
+
+      **出力形式:**
+      各スロットのタスク指示は、子ピースが単独で実行できるだけの十分な情報を含めてください:
+      - 背景・目的
+      - 実装内容の詳細
+      - 制約・注意事項
+      - 確認方法
+
+      ## slot_1
+      （タスク指示）
+
+      ## slot_2
+      （タスク指示 or タスクなし）
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: バッチ実行
+        next: execute_batch
+      - condition: タスクなし
+        next: COMPLETE
   - name: execute_batch
     parallel:
       - name: slot_1
@@ -144,9 +166,9 @@ movements:
           format: plan
     rules:
       - condition: 失敗スロットあり
-        next: decompose
+        next: assign_slots
       - condition: 残りタスクあり
-        next: decompose
+        next: assign_slots
       - condition: 全タスク完了
         next: COMPLETE
       - condition: リトライ上限到達

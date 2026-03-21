@@ -2,11 +2,11 @@
  * Tests for roadmap piece YAML validation and integration.
  *
  * Covers:
- * - Schema validation of roadmap.yaml structure (4 movements: decompose, review_decomposition, execute_batch, check_remaining)
+ * - Schema validation of roadmap.yaml structure (5 movements: decompose, review_decomposition, assign_slots, execute_batch, check_remaining)
  * - review_decomposition parallel movement with 3 reviewer sub-movements
  * - parallel movement with 2 piece_call sub-movements validates against PieceConfigRawSchema
  * - piece_call constraints respected (no persona/instruction/edit on piece_call slots)
- * - decompose → review_decomposition → execute_batch / decompose transition rules
+ * - decompose → review_decomposition → assign_slots → execute_batch / decompose transition rules
  * - personas section map with 3 decomposition reviewer personas
  * - piece-categories.yaml includes roadmap in 「その他」 category
  * - Integration: roadmap piece loads via pieceLoader
@@ -87,8 +87,23 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
           },
         ],
         rules: [
-          { condition: 'all("approved")', next: 'execute_batch' },
+          { condition: 'all("approved")', next: 'assign_slots' },
           { condition: 'any("needs_fix")', next: 'decompose' },
+        ],
+      },
+      {
+        name: 'assign_slots',
+        persona: 'planner',
+        edit: false,
+        instruction: 'Assign next batch of tasks to slots.',
+        output_contracts: {
+          report: [
+            { name: 'roadmap-tasks.md', format: 'plan' },
+          ],
+        },
+        rules: [
+          { condition: 'バッチ実行', next: 'execute_batch' },
+          { condition: 'タスクなし', next: 'COMPLETE' },
         ],
       },
       {
@@ -124,8 +139,8 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
         edit: false,
         instruction: 'Check remaining tasks from {report:roadmap-tasks.md}.',
         rules: [
-          { condition: '失敗スロットあり', next: 'decompose' },
-          { condition: '残りタスクあり', next: 'decompose' },
+          { condition: '失敗スロットあり', next: 'assign_slots' },
+          { condition: '残りタスクあり', next: 'assign_slots' },
           { condition: '全タスク完了', next: 'COMPLETE' },
           { condition: 'リトライ上限到達', next: 'COMPLETE' },
         ],
@@ -181,14 +196,14 @@ describe('roadmap piece: PieceConfigRawSchema validation', () => {
     }
   });
 
-  it('should have exactly 4 movements', () => {
+  it('should have exactly 5 movements', () => {
     const raw = makeRoadmapPieceRaw();
 
     const result = PieceConfigRawSchema.safeParse(raw);
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.movements).toHaveLength(4);
+      expect(result.data.movements).toHaveLength(5);
     }
   });
 
@@ -314,7 +329,7 @@ describe('roadmap piece: review_decomposition movement', () => {
         },
       ],
       rules: [
-        { condition: 'all("approved")', next: 'execute_batch' },
+        { condition: 'all("approved")', next: 'assign_slots' },
         { condition: 'any("needs_fix")', next: 'decompose' },
       ],
     };
@@ -324,7 +339,7 @@ describe('roadmap piece: review_decomposition movement', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should have aggregate rule all("approved") routing to execute_batch', () => {
+  it('should have aggregate rule all("approved") routing to assign_slots', () => {
     const reviewDecomposition = {
       name: 'review_decomposition',
       parallel: [
@@ -337,7 +352,7 @@ describe('roadmap piece: review_decomposition movement', () => {
         },
       ],
       rules: [
-        { condition: 'all("approved")', next: 'execute_batch' },
+        { condition: 'all("approved")', next: 'assign_slots' },
         { condition: 'any("needs_fix")', next: 'decompose' },
       ],
     };
@@ -348,7 +363,7 @@ describe('roadmap piece: review_decomposition movement', () => {
     if (result.success) {
       const allApprovedRule = result.data.rules?.find(r => r.condition === 'all("approved")');
       expect(allApprovedRule).toBeDefined();
-      expect(allApprovedRule!.next).toBe('execute_batch');
+      expect(allApprovedRule!.next).toBe('assign_slots');
     }
   });
 
@@ -365,7 +380,7 @@ describe('roadmap piece: review_decomposition movement', () => {
         },
       ],
       rules: [
-        { condition: 'all("approved")', next: 'execute_batch' },
+        { condition: 'all("approved")', next: 'assign_slots' },
         { condition: 'any("needs_fix")', next: 'decompose' },
       ],
     };
@@ -596,8 +611,8 @@ describe('roadmap piece: check_remaining movement', () => {
       edit: false,
       instruction: 'Check remaining tasks.',
       rules: [
-        { condition: '失敗スロットあり', next: 'decompose' },
-        { condition: '残りタスクあり', next: 'decompose' },
+        { condition: '失敗スロットあり', next: 'assign_slots' },
+        { condition: '残りタスクあり', next: 'assign_slots' },
         { condition: '全タスク完了', next: 'COMPLETE' },
         { condition: 'リトライ上限到達', next: 'COMPLETE' },
       ],
@@ -611,15 +626,15 @@ describe('roadmap piece: check_remaining movement', () => {
     }
   });
 
-  it('should have rules routing back to decompose for failed slots and remaining tasks', () => {
+  it('should have rules routing to assign_slots for failed slots and remaining tasks', () => {
     const checkRemaining = {
       name: 'check_remaining',
       persona: 'planner',
       edit: false,
       instruction: 'Check remaining tasks.',
       rules: [
-        { condition: '失敗スロットあり', next: 'decompose' },
-        { condition: '残りタスクあり', next: 'decompose' },
+        { condition: '失敗スロットあり', next: 'assign_slots' },
+        { condition: '残りタスクあり', next: 'assign_slots' },
         { condition: '全タスク完了', next: 'COMPLETE' },
         { condition: 'リトライ上限到達', next: 'COMPLETE' },
       ],
@@ -629,8 +644,8 @@ describe('roadmap piece: check_remaining movement', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      const decomposeRules = result.data.rules?.filter(r => r.next === 'decompose');
-      expect(decomposeRules).toHaveLength(2);
+      const assignSlotsRules = result.data.rules?.filter(r => r.next === 'assign_slots');
+      expect(assignSlotsRules).toHaveLength(2);
 
       const completeRules = result.data.rules?.filter(r => r.next === 'COMPLETE');
       expect(completeRules).toHaveLength(2);
@@ -759,12 +774,12 @@ describe('roadmap piece: builtin loading', () => {
     expect(config!.maxMovements).toBe(200);
   });
 
-  it('should have exactly 4 movements: decompose, review_decomposition, execute_batch, check_remaining', () => {
+  it('should have exactly 5 movements: decompose, review_decomposition, assign_slots, execute_batch, check_remaining', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
     const movementNames = config!.movements.map(m => m.name);
-    expect(movementNames).toEqual(['decompose', 'review_decomposition', 'execute_batch', 'check_remaining']);
+    expect(movementNames).toEqual(['decompose', 'review_decomposition', 'assign_slots', 'execute_batch', 'check_remaining']);
   });
 
   it('should have decompose movement with edit: false', () => {
@@ -776,25 +791,25 @@ describe('roadmap piece: builtin loading', () => {
     expect(decompose!.edit).toBe(false);
   });
 
-  it('should have decompose instruction referencing only slot_1 and slot_2', () => {
+  it('should have assign_slots instruction referencing only slot_1 and slot_2', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
-    const decompose = config!.movements.find(m => m.name === 'decompose');
-    expect(decompose).toBeDefined();
-    expect(decompose!.instruction).toContain('slot_1');
-    expect(decompose!.instruction).toContain('slot_2');
-    expect(decompose!.instruction).not.toContain('slot_3');
+    const assignSlots = config!.movements.find(m => m.name === 'assign_slots');
+    expect(assignSlots).toBeDefined();
+    expect(assignSlots!.instruction).toContain('slot_1');
+    expect(assignSlots!.instruction).toContain('slot_2');
+    expect(assignSlots!.instruction).not.toContain('slot_3');
   });
 
-  it('should have decompose instruction mentioning 最大2件', () => {
+  it('should have assign_slots instruction mentioning 最大2件', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
-    const decompose = config!.movements.find(m => m.name === 'decompose');
-    expect(decompose).toBeDefined();
-    expect(decompose!.instruction).toContain('最大2件');
-    expect(decompose!.instruction).not.toContain('最大3件');
+    const assignSlots = config!.movements.find(m => m.name === 'assign_slots');
+    expect(assignSlots).toBeDefined();
+    expect(assignSlots!.instruction).toContain('最大2件');
+    expect(assignSlots!.instruction).not.toContain('最大3件');
   });
 
   it('should have execute_batch as a parallel movement with 2 piece_call sub-movements', () => {
@@ -827,7 +842,7 @@ describe('roadmap piece: builtin loading', () => {
     expect(anyRule).toBeDefined();
   });
 
-  it('should have check_remaining with rules routing back to decompose and to COMPLETE', () => {
+  it('should have check_remaining with rules routing to assign_slots and to COMPLETE', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
@@ -835,8 +850,8 @@ describe('roadmap piece: builtin loading', () => {
     expect(checkRemaining).toBeDefined();
     expect(checkRemaining!.rules).toBeDefined();
 
-    const decomposeRules = checkRemaining!.rules!.filter(r => r.next === 'decompose');
-    expect(decomposeRules.length).toBeGreaterThanOrEqual(2);
+    const assignSlotsRules = checkRemaining!.rules!.filter(r => r.next === 'assign_slots');
+    expect(assignSlotsRules.length).toBeGreaterThanOrEqual(2);
 
     const completeRules = checkRemaining!.rules!.filter(r => r.next === 'COMPLETE');
     expect(completeRules.length).toBeGreaterThanOrEqual(2);
@@ -911,7 +926,7 @@ describe('roadmap piece: builtin loading', () => {
 
     const allApproved = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'all');
     expect(allApproved).toBeDefined();
-    expect(allApproved!.next).toBe('execute_batch');
+    expect(allApproved!.next).toBe('assign_slots');
 
     const anyNeedsFix = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'any');
     expect(anyNeedsFix).toBeDefined();
@@ -1004,12 +1019,12 @@ describe('roadmap piece: EN builtin loading', () => {
     expect(config!.name).toBe('roadmap');
   });
 
-  it('should have exactly 4 movements in EN version', () => {
+  it('should have exactly 5 movements in EN version', () => {
     const config = loadPiece('roadmap', testDir);
 
     expect(config).not.toBeNull();
     const movementNames = config!.movements.map(m => m.name);
-    expect(movementNames).toEqual(['decompose', 'review_decomposition', 'execute_batch', 'check_remaining']);
+    expect(movementNames).toEqual(['decompose', 'review_decomposition', 'assign_slots', 'execute_batch', 'check_remaining']);
   });
 
   it('should have review_decomposition as a parallel movement with 3 reviewer sub-movements in EN version', () => {
@@ -1083,7 +1098,7 @@ describe('roadmap piece: EN builtin loading', () => {
 
     const allApproved = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'all');
     expect(allApproved).toBeDefined();
-    expect(allApproved!.next).toBe('execute_batch');
+    expect(allApproved!.next).toBe('assign_slots');
 
     const anyNeedsFix = reviewDecomp!.rules!.find(r => r.isAggregateCondition && r.aggregateType === 'any');
     expect(anyNeedsFix).toBeDefined();
