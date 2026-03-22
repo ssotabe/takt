@@ -130,13 +130,13 @@ movements:
     parallel:
       - name: slot_1
         kind: piece_call
-        call: takt-default
+        call: default
         rules:
           - condition: COMPLETE
           - condition: ABORT
       - name: slot_2
         kind: piece_call
-        call: takt-default
+        call: default
         rules:
           - condition: COMPLETE
           - condition: ABORT

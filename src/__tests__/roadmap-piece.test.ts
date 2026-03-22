@@ -115,7 +115,7 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
           {
             name: 'slot_1',
             kind: 'piece_call',
-            call: 'takt-default',
+            call: 'default',
             rules: [
               { condition: 'COMPLETE' },
               { condition: 'ABORT' },
@@ -124,7 +124,7 @@ function makeRoadmapPieceRaw(overrides: Record<string, unknown> = {}): Record<st
           {
             name: 'slot_2',
             kind: 'piece_call',
-            call: 'takt-default',
+            call: 'default',
             rules: [
               { condition: 'COMPLETE' },
               { condition: 'ABORT' },
@@ -157,7 +157,7 @@ function makeParallelPieceCallSlot(overrides: Record<string, unknown> = {}): Rec
   return {
     name: 'slot_1',
     kind: 'piece_call',
-    call: 'takt-default',
+    call: 'default',
     rules: [
       { condition: 'COMPLETE' },
       { condition: 'ABORT' },
@@ -533,14 +533,14 @@ describe('roadmap piece: execute_batch movement', () => {
     }
   });
 
-  it('should accept piece_call sub-movements calling takt-default', () => {
-    const slot = makeParallelPieceCallSlot({ call: 'takt-default' });
+  it('should accept piece_call sub-movements calling default', () => {
+    const slot = makeParallelPieceCallSlot({ call: 'default' });
 
     const result = ParallelSubMovementRawSchema.safeParse(slot);
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.call).toBe('takt-default');
+      expect(result.data.call).toBe('default');
     }
   });
 
@@ -878,7 +878,7 @@ describe('roadmap piece: builtin loading', () => {
 
     for (const slot of executeBatch!.parallel!) {
       expect(slot.kind).toBe('piece_call');
-      expect(slot.call).toBe('takt-default');
+      expect(slot.call).toBe('default');
     }
   });
 
