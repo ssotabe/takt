@@ -105,7 +105,7 @@ describe('AggregateEvaluator', () => {
       expect(evaluator.evaluate()).toBe(-1);
     });
 
-    it('should not match when sub-movement has no matched rule', () => {
+    it('should exclude sub-movement with no matched rule (empty slot) from all() evaluation', () => {
       const sub1 = makeSubMovement('review-a', ['approved', 'rejected']);
       const sub2 = makeSubMovement('review-b', ['approved', 'rejected']);
 
@@ -119,14 +119,14 @@ describe('AggregateEvaluator', () => {
         },
       ]);
 
-      // sub2 has no matched rule
+      // sub2 has no matched rule (empty slot) → excluded, only sub1 evaluated
       const state = makeState({
         'review-a': { matchedRuleIndex: 0 },
         'review-b': {},
       });
 
       const evaluator = new AggregateEvaluator(step, state);
-      expect(evaluator.evaluate()).toBe(-1);
+      expect(evaluator.evaluate()).toBe(0);
     });
   });
 
@@ -321,7 +321,7 @@ describe('AggregateEvaluator', () => {
       expect(evaluator.evaluate()).toBe(1);
     });
 
-    it('should skip sub-movements missing from state outputs', () => {
+    it('should exclude sub-movements missing from state outputs (treated as empty slot)', () => {
       const sub1 = makeSubMovement('review-a', ['approved']);
       const sub2 = makeSubMovement('review-b', ['approved']);
 
@@ -335,13 +335,13 @@ describe('AggregateEvaluator', () => {
         },
       ]);
 
-      // review-b is missing from state
+      // review-b is missing from state → treated as empty slot, excluded
       const state = makeState({
         'review-a': { matchedRuleIndex: 0 },
       });
 
       const evaluator = new AggregateEvaluator(step, state);
-      expect(evaluator.evaluate()).toBe(-1);
+      expect(evaluator.evaluate()).toBe(0);
     });
   });
 });

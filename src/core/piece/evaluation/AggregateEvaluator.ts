@@ -19,8 +19,8 @@ const log = createLogger('aggregate-evaluator');
  * - any("A", "B"): true when at least ONE sub-movement matches "A" OR "B"
  *
  * Edge cases per spec:
- * - Sub-movement with no matched rule: all() → false, any() → skip that sub-movement
- * - No sub-movements (0 件): both → false
+ * - Sub-movement with no matched rule (empty slot): excluded from evaluation for both all() and any()
+ * - No active sub-movements (all empty or 0件): both → false
  * - Non-parallel movement: both → false
  * - all("A", "B") with wrong number of sub-movements: false (logged as error)
  */
@@ -36,6 +36,12 @@ export class AggregateEvaluator {
    */
   evaluate(): number {
     if (!this.step.rules || !this.step.parallel || this.step.parallel.length === 0) return -1;
+
+    // Helper: determine if a sub-movement is an active slot (not empty/skipped)
+    const isActiveSlot = (sub: PieceMovement): boolean => {
+      const output = this.state.movementOutputs.get(sub.name);
+      return output != null && output.matchedRuleIndex != null;
+    };
 
     for (let i = 0; i < this.step.rules.length; i++) {
       const rule = this.step.rules[i];
@@ -58,10 +64,14 @@ export class AggregateEvaluator {
             });
             continue;
           }
+          // Guard: all slots empty → false
+          if (!subMovements.some(isActiveSlot)) continue;
           const allMatch = subMovements.every((sub, idx) => {
+            // Empty slot: skip (treat as true) to preserve index alignment
+            if (!isActiveSlot(sub)) return true;
             const output = this.state.movementOutputs.get(sub.name);
-            if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
-            const matchedRule = sub.rules[output.matchedRuleIndex];
+            if (!output || !sub.rules) return false;
+            const matchedRule = sub.rules[output.matchedRuleIndex!];
             const expectedCondition = targetCondition[idx];
             if (!expectedCondition) return false;
             return matchedRule?.condition === expectedCondition;
@@ -71,11 +81,14 @@ export class AggregateEvaluator {
             return i;
           }
         } else {
-          // Single condition: all sub-movements must match the same condition
-          const allMatch = subMovements.every((sub) => {
+          // Single condition: all active sub-movements must match the same condition
+          const activeSubMovements = subMovements.filter(isActiveSlot);
+          // Guard: no active slots → false
+          if (activeSubMovements.length === 0) continue;
+          const allMatch = activeSubMovements.every((sub) => {
             const output = this.state.movementOutputs.get(sub.name);
-            if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
-            const matchedRule = sub.rules[output.matchedRuleIndex];
+            if (!output || !sub.rules) return false;
+            const matchedRule = sub.rules[output.matchedRuleIndex!];
             return matchedRule?.condition === targetCondition;
           });
           if (allMatch) {
@@ -86,23 +99,30 @@ export class AggregateEvaluator {
       } else {
         // 'any'
         if (Array.isArray(targetCondition)) {
-          // Multiple conditions: at least one sub-movement matches at least one condition
-          const anyMatch = subMovements.some((sub) => {
+          // Multiple conditions: at least one active sub-movement matches at least one condition
+          const activeSubMovements = subMovements.filter(isActiveSlot);
+          // Guard: no active slots → false
+          if (activeSubMovements.length === 0) continue;
+          const anyMatch = activeSubMovements.some((sub) => {
             const output = this.state.movementOutputs.get(sub.name);
-            if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
-            const matchedRule = sub.rules[output.matchedRuleIndex];
-            return targetCondition.includes(matchedRule?.condition ?? '');
+            if (!output || !sub.rules) return false;
+            const matchedRule = sub.rules[output.matchedRuleIndex!];
+            const condition = matchedRule?.condition;
+            return condition != null && targetCondition.includes(condition);
           });
           if (anyMatch) {
             log.debug('Aggregate any() matched (multi-condition)', { movement: this.step.name, conditions: targetCondition, ruleIndex: i });
             return i;
           }
         } else {
-          // Single condition: at least one sub-movement matches the condition
-          const anyMatch = subMovements.some((sub) => {
+          // Single condition: at least one active sub-movement matches the condition
+          const activeSubMovements = subMovements.filter(isActiveSlot);
+          // Guard: no active slots → false
+          if (activeSubMovements.length === 0) continue;
+          const anyMatch = activeSubMovements.some((sub) => {
             const output = this.state.movementOutputs.get(sub.name);
-            if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
-            const matchedRule = sub.rules[output.matchedRuleIndex];
+            if (!output || !sub.rules) return false;
+            const matchedRule = sub.rules[output.matchedRuleIndex!];
             return matchedRule?.condition === targetCondition;
           });
           if (anyMatch) {
