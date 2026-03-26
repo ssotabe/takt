@@ -3,6 +3,10 @@ Analyze the task and formulate an implementation plan including design decisions
 **Note:** If a Previous Response exists, this is a replan due to rejection.
 Revise the plan taking that feedback into account.
 
+**However:** If the Previous Response is empty or contains only "タスクなし" (no task),
+this is NOT a replan. No work is assigned to this slot.
+End immediately without creating a plan.
+
 **Criteria for small tasks:**
 - Only 1-2 file changes
 - No design decisions needed

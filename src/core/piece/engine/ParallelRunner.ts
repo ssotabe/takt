@@ -131,6 +131,18 @@ export class ParallelRunner {
         if (subMovement.kind === 'piece_call' && this.deps.pieceCallRunner) {
           incrementMovementIteration(state, subMovement.name);
           const slotOverrides = slotContext?.overrides.get(subMovement.name);
+          // Empty slot: slotContext exists (slot pattern detected) but no overrides for this slot
+          if (slotContext && !slotOverrides) {
+            log.info('Skipping empty slot piece_call', { movement: subMovement.name });
+            const skippedResponse: AgentResponse = {
+              persona: subMovement.name,
+              status: 'done',
+              content: '',
+              timestamp: new Date(),
+            };
+            state.movementOutputs.set(subMovement.name, skippedResponse);
+            return { subMovement, response: skippedResponse, instruction: '' };
+          }
           const worktreeInfo = slotContext?.worktrees.get(subMovement.name);
           const timeoutMs = subMovement.timeoutMs ?? defaultTimeoutMs;
           const { signal, dispose } = buildAbortSignal(timeoutMs, this.deps.engineOptions.abortSignal);

@@ -175,7 +175,7 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
   // =====================================================
   describe('slot distribution', () => {
     it('should parse decompose output and distribute slot-specific tasks to each piece_call', async () => {
-      // Given: decompose produces slot instructions
+      // Given: decompose produces slot instructions (slot_3 is empty → skipped)
       const decomposeOutput = [
         '## slot_1',
         'Implement feature A.',
@@ -195,7 +195,7 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
 
       vi.mocked(parseSlotSections).mockReturnValue(slotMap);
 
-      // Setup worktree mocks
+      // Setup worktree mocks (only called for non-empty slots)
       vi.mocked(createParallelWorktree).mockImplementation((_projectDir, slotName) => ({
         path: `/tmp/worktrees/${slotName}`,
         branch: `parallel-${slotName}`,
@@ -210,13 +210,11 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         loadPieceByIdentifier: loadPiece,
       });
 
-      // decompose agent response
+      // decompose agent response + child agents for slot_1, slot_2 (slot_3 skipped)
       mockRunAgentSequence([
         makeResponse({ persona: 'decompose', content: decomposeOutput }),
-        // child agents for slot_1, slot_2, slot_3
         makeResponse({ persona: 'child-step', content: 'Feature A done' }),
         makeResponse({ persona: 'child-step', content: 'Feature B done' }),
-        makeResponse({ persona: 'child-step', content: 'No task' }),
       ]);
 
       mockDetectMatchedRuleSequence([
@@ -225,8 +223,6 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         { index: 0, method: 'phase1_tag' },  // slot_1 → COMPLETE
         { index: 0, method: 'phase1_tag' },  // slot_2 child → COMPLETE
         { index: 0, method: 'phase1_tag' },  // slot_2 → COMPLETE
-        { index: 0, method: 'phase1_tag' },  // slot_3 child → COMPLETE
-        { index: 0, method: 'phase1_tag' },  // slot_3 → COMPLETE
         { index: 0, method: 'aggregate' },   // execute_batch: all("COMPLETE")
       ]);
 
@@ -283,8 +279,8 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
   // 3. Worktree isolation: each piece_call in separate worktree
   // =====================================================
   describe('worktree isolation', () => {
-    it('should create a separate worktree for each slot', async () => {
-      // Given
+    it('should create a separate worktree for each non-empty slot', async () => {
+      // Given: slot_3 is empty → skipped (no worktree)
       const slotMap = new Map<string, string>([
         ['slot_1', 'Task 1'],
         ['slot_2', 'Task 2'],
@@ -309,7 +305,6 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         makeResponse({ persona: 'decompose', content: 'decompose output' }),
         makeResponse({ persona: 'child-step', content: 'Done 1' }),
         makeResponse({ persona: 'child-step', content: 'Done 2' }),
-        makeResponse({ persona: 'child-step', content: 'Done 3' }),
       ]);
 
       mockDetectMatchedRuleSequence([
@@ -318,18 +313,15 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         { index: 0, method: 'phase1_tag' },  // slot_1 → COMPLETE
         { index: 0, method: 'phase1_tag' },  // slot_2 child → COMPLETE
         { index: 0, method: 'phase1_tag' },  // slot_2 → COMPLETE
-        { index: 0, method: 'phase1_tag' },  // slot_3 child → COMPLETE
-        { index: 0, method: 'phase1_tag' },  // slot_3 → COMPLETE
         { index: 0, method: 'aggregate' },   // all("COMPLETE")
       ]);
 
       await engine.run();
 
-      // Then: createParallelWorktree called for each slot
-      expect(createParallelWorktree).toHaveBeenCalledTimes(3);
+      // Then: createParallelWorktree called only for non-empty slots
+      expect(createParallelWorktree).toHaveBeenCalledTimes(2);
       expect(createParallelWorktree).toHaveBeenCalledWith(tmpDir, 'slot_1');
       expect(createParallelWorktree).toHaveBeenCalledWith(tmpDir, 'slot_2');
-      expect(createParallelWorktree).toHaveBeenCalledWith(tmpDir, 'slot_3');
     });
   });
 
@@ -337,8 +329,8 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
   // 4. Cleanup: worktrees cleaned up after completion
   // =====================================================
   describe('worktree cleanup', () => {
-    it('should cleanup worktrees after all slots complete', async () => {
-      // Given
+    it('should cleanup worktrees after all non-empty slots complete', async () => {
+      // Given: slot_3 is empty → skipped (no worktree, no cleanup)
       const slotMap = new Map<string, string>([
         ['slot_1', 'Task 1'],
         ['slot_2', 'Task 2'],
@@ -363,12 +355,9 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         makeResponse({ persona: 'decompose', content: 'decompose output' }),
         makeResponse({ persona: 'child-step', content: 'Done 1' }),
         makeResponse({ persona: 'child-step', content: 'Done 2' }),
-        makeResponse({ persona: 'child-step', content: 'Done 3' }),
       ]);
 
       mockDetectMatchedRuleSequence([
-        { index: 0, method: 'phase1_tag' },
-        { index: 0, method: 'phase1_tag' },
         { index: 0, method: 'phase1_tag' },
         { index: 0, method: 'phase1_tag' },
         { index: 0, method: 'phase1_tag' },
@@ -379,8 +368,8 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
 
       await engine.run();
 
-      // Then: cleanupParallelWorktree called for each slot with shouldMerge=true (all COMPLETE)
-      expect(cleanupParallelWorktree).toHaveBeenCalledTimes(3);
+      // Then: cleanupParallelWorktree called only for non-empty slots
+      expect(cleanupParallelWorktree).toHaveBeenCalledTimes(2);
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_1',
         tmpDir,
@@ -393,16 +382,10 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         true,
         expect.any(String),
       );
-      expect(cleanupParallelWorktree).toHaveBeenCalledWith(
-        '/tmp/worktrees/slot_3',
-        tmpDir,
-        true,
-        expect.any(String),
-      );
     });
 
     it('should cleanup worktrees even when a slot fails', async () => {
-      // Given: slot_2 child will fail
+      // Given: slot_2 child will fail, slot_3 is empty → skipped
       const slotMap = new Map<string, string>([
         ['slot_1', 'Task 1'],
         ['slot_2', 'Task 2 (will fail)'],
@@ -423,34 +406,29 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         loadPieceByIdentifier: loadPiece,
       });
 
-      // slot_1 succeeds, slot_2 child aborts, slot_3 succeeds
+      // slot_1 succeeds, slot_2 child aborts (slot_3 skipped — no agent)
       mockRunAgentSequence([
         makeResponse({ persona: 'decompose', content: 'decompose output' }),
         makeResponse({ persona: 'child-step', content: 'Done 1' }),
         makeResponse({ persona: 'child-step', content: 'Build failed' }),
-        makeResponse({ persona: 'child-step', content: 'Done 3' }),
       ]);
 
       // Use argument-based mock to avoid sequential consumption issues with Promise.allSettled.
-      // PieceCallRunner now pre-resolves matchedRuleIndex from child status, so we must
-      // make the child PieceEngine abort by returning ABORT for child-step with failure content.
       const mock = vi.mocked(detectMatchedRule);
       mock.mockResolvedValueOnce({ index: 0, method: 'phase1_tag' }); // decompose → execute_batch
       mock.mockImplementation(async (movement, content) => {
         const name = (movement as { name: string }).name;
-        // Child piece's internal movement: abort when content indicates failure
         if (name === 'child-step' && typeof content === 'string' && content.includes('Build failed')) {
           return { index: 1, method: 'phase1_tag' as const };
         }
         if (name === 'execute_batch') return { index: 1, method: 'aggregate' as const };
-        // slot_1, slot_3, and child-step movements for non-ABORT slots
         return { index: 0, method: 'phase1_tag' as const };
       });
 
       await engine.run();
 
-      // Then: cleanup called for all slots; ABORT slot gets shouldMerge=false
-      expect(cleanupParallelWorktree).toHaveBeenCalledTimes(3);
+      // Then: cleanup called only for non-empty slots; ABORT slot gets shouldMerge=false
+      expect(cleanupParallelWorktree).toHaveBeenCalledTimes(2);
       expect(cleanupParallelWorktree).toHaveBeenCalledWith(
         '/tmp/worktrees/slot_1',
         tmpDir,
@@ -463,12 +441,6 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         false,
         expect.any(String),
       );
-      expect(cleanupParallelWorktree).toHaveBeenCalledWith(
-        '/tmp/worktrees/slot_3',
-        tmpDir,
-        true,
-        expect.any(String),
-      );
     });
   });
 
@@ -477,7 +449,7 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
   // =====================================================
   describe('PieceCallOverrides propagation', () => {
     it('should pass slot-specific task to child engine via PieceCallOverrides', async () => {
-      // Given: slot_1 has specific instructions, slot_2 has "タスクなし"
+      // Given: slot_1 has specific instructions, slot_2 is empty → skipped
       const slotMap = new Map<string, string>([
         ['slot_1', 'Specific task for slot 1'],
         ['slot_2', ''],
@@ -529,26 +501,25 @@ describe('PieceEngine Integration: parallel piece_call with slot distribution', 
         }),
       });
 
+      // Only slot_1 runs (slot_2 is empty → skipped)
       mockRunAgentSequence([
         makeResponse({ persona: 'child-step', content: 'Slot 1 done' }),
-        makeResponse({ persona: 'child-step', content: 'Slot 2 done' }),
       ]);
 
       mockDetectMatchedRuleSequence([
         { index: 0, method: 'phase1_tag' },  // slot_1 child → COMPLETE
         { index: 0, method: 'phase1_tag' },  // slot_1 → COMPLETE
-        { index: 0, method: 'phase1_tag' },  // slot_2 child → COMPLETE
-        { index: 0, method: 'phase1_tag' },  // slot_2 → COMPLETE
         { index: 0, method: 'aggregate' },   // all("COMPLETE")
       ]);
 
       const state = await engine.run();
 
-      // Then: engine should complete (integration test validates the override flow end-to-end)
+      // Then: engine should complete
       expect(state.status).toBe('completed');
 
-      // Then: worktrees should be created
-      expect(createParallelWorktree).toHaveBeenCalledTimes(2);
+      // Then: worktree created only for non-empty slot
+      expect(createParallelWorktree).toHaveBeenCalledTimes(1);
+      expect(createParallelWorktree).toHaveBeenCalledWith(tmpDir, 'slot_1');
     });
   });
 

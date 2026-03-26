@@ -575,21 +575,11 @@ describe('PieceEngine Integration: piece_call movement', () => {
         loadPieceByIdentifier: loadPiece,
       });
 
-      mockRunAgentSequence([
-        makeResponse({ persona: 'child-step', content: 'No task' }),
-        makeResponse({ persona: 'child-step', content: 'No task' }),
-        makeResponse({ persona: 'child-step', content: 'No task' }),
-      ]);
+      // All slots are empty → all piece_calls are skipped (no child agents run)
+      mockRunAgentSequence([]);
 
-      // All slots complete immediately (no task assigned)
       mockDetectMatchedRuleSequence([
-        { index: 1, method: 'phase1_tag' },  // slot_1 child → no_task
-        { index: 1, method: 'phase1_tag' },  // slot_1 → no_task
-        { index: 1, method: 'phase1_tag' },  // slot_2 child → no_task
-        { index: 1, method: 'phase1_tag' },  // slot_2 → no_task
-        { index: 1, method: 'phase1_tag' },  // slot_3 child → no_task
-        { index: 1, method: 'phase1_tag' },  // slot_3 → no_task
-        { index: 0, method: 'aggregate' },   // all completed
+        { index: 0, method: 'aggregate' },   // all("completed") — skipped slots have status 'done'
       ]);
 
       const state = await engine.run();

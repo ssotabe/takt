@@ -48,6 +48,10 @@ export function prepareSlotContext(
 
   for (const slotName of slotNames) {
     const slotContent = slotSections.get(slotName)!;
+    if (slotContent === '') {
+      log.debug('Skipping empty slot', { slotName });
+      continue;
+    }
     const worktreeInfo = createParallelWorktree(projectCwd, slotName);
     worktrees.set(slotName, worktreeInfo);
 
