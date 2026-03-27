@@ -19,10 +19,22 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => ({
   }),
 }));
 
-const { mockCheckCliStatus, mockFetchIssue, mockFetchPrReviewComments } = vi.hoisted(() => ({
+const {
+  mockCheckCliStatus,
+  mockFetchIssue,
+  mockFetchPrReviewComments,
+  mockResolveConfigValues,
+  mockResolveAssistantConfigLayers,
+  mockLoadPersonaSessions,
+  mockResolveAgentOverrides,
+} = vi.hoisted(() => ({
   mockCheckCliStatus: vi.fn(),
   mockFetchIssue: vi.fn(),
   mockFetchPrReviewComments: vi.fn(),
+  mockResolveConfigValues: vi.fn(() => ({ language: 'en', interactivePreviewMovements: 3, provider: 'claude' })),
+  mockResolveAssistantConfigLayers: vi.fn(() => ({ local: {}, global: {} })),
+  mockLoadPersonaSessions: vi.fn(() => ({})),
+  mockResolveAgentOverrides: vi.fn(),
 }));
 
 vi.mock('../infra/git/index.js', () => ({
@@ -31,13 +43,12 @@ vi.mock('../infra/git/index.js', () => ({
     fetchIssue: (...args: unknown[]) => mockFetchIssue(...args),
     fetchPrReviewComments: (...args: unknown[]) => mockFetchPrReviewComments(...args),
   }),
-}));
-
-vi.mock('../infra/github/issue.js', () => ({
   parseIssueNumbers: vi.fn(() => []),
   formatIssueAsTask: vi.fn(),
   isIssueReference: vi.fn(),
   resolveIssueTask: vi.fn(),
+  formatPrReviewAsTask: vi.fn((pr: { number: number; title: string }) =>
+    `## PR #${pr.number} Review Comments: ${pr.title}`),
 }));
 
 vi.mock('../features/tasks/index.js', () => ({
@@ -81,9 +92,13 @@ vi.mock('../infra/task/index.js', () => ({
 
 vi.mock('../infra/config/index.js', () => ({
   getPieceDescription: vi.fn(() => ({ name: 'default', description: 'test piece', pieceStructure: '', movementPreviews: [] })),
-  resolveConfigValues: vi.fn(() => ({ language: 'en', interactivePreviewMovements: 3, provider: 'claude' })),
+  resolveConfigValues: (...args: unknown[]) => mockResolveConfigValues(...args),
   resolveConfigValue: vi.fn(() => undefined),
-  loadPersonaSessions: vi.fn(() => ({})),
+  loadPersonaSessions: (...args: unknown[]) => mockLoadPersonaSessions(...args),
+}));
+
+vi.mock('../features/interactive/assistantConfig.js', () => ({
+  resolveAssistantConfigLayers: (...args: unknown[]) => mockResolveAssistantConfigLayers(...args),
 }));
 
 const mockOpts: Record<string, unknown> = {};
@@ -102,7 +117,7 @@ vi.mock('../app/cli/program.js', () => {
 });
 
 vi.mock('../app/cli/helpers.js', () => ({
-  resolveAgentOverrides: vi.fn(),
+  resolveAgentOverrides: (...args: unknown[]) => mockResolveAgentOverrides(...args),
   isDirectTask: vi.fn(() => false),
 }));
 
@@ -120,6 +135,8 @@ const mockInteractiveMode = vi.mocked(interactiveMode);
 const mockExecutePipeline = vi.mocked(executePipeline);
 const mockLogError = vi.mocked(logError);
 const mockSaveTaskFromInteractive = vi.mocked(saveTaskFromInteractive);
+const mockResolveConfigValuesFn = mockResolveConfigValues;
+const mockLoadPersonaSessionsFn = mockLoadPersonaSessions;
 
 function createMockPrReview(overrides: Partial<PrReviewData & { baseRefName?: string }> = {}): PrReviewData {
   return {
@@ -144,6 +161,10 @@ beforeEach(() => {
   mockInteractiveMode.mockResolvedValue({ action: 'execute', task: 'summarized task' });
   mockListAllTaskItems.mockReturnValue([]);
   mockIsStaleRunningTask.mockReturnValue(false);
+  mockResolveConfigValuesFn.mockReturnValue({ language: 'en', interactivePreviewMovements: 3, provider: 'claude' });
+  mockResolveAssistantConfigLayers.mockReturnValue({ local: {}, global: {} });
+  mockLoadPersonaSessionsFn.mockReturnValue({});
+  mockResolveAgentOverrides.mockReturnValue(undefined);
 });
 
 describe('PR resolution in routing', () => {
@@ -159,7 +180,7 @@ describe('PR resolution in routing', () => {
       await executeDefaultAction();
 
       // Then
-      expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+      expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, undefined);
       expect(mockInteractiveMode).toHaveBeenCalledWith(
         '/test/cwd',
         expect.stringContaining('## PR #456 Review Comments:'),
@@ -373,6 +394,132 @@ describe('PR resolution in routing', () => {
       mockExit.mockRestore();
 
       Object.defineProperty(programModule, 'pipelineMode', { value: originalPipelineMode, writable: true });
+    });
+  });
+
+  describe('--continue with assistant provider', () => {
+    it('should load interactive session using takt_providers.assistant provider when configured', async () => {
+      mockOpts.continue = true;
+      mockResolveConfigValuesFn.mockReturnValue({
+        language: 'en',
+        interactivePreviewMovements: 3,
+        provider: 'codex',
+      });
+      mockResolveAssistantConfigLayers.mockReturnValue({
+        local: {
+          provider: 'codex',
+          taktProviders: {
+            assistant: {
+              provider: 'claude',
+              model: 'haiku',
+            },
+          },
+        },
+        global: {},
+      });
+      mockLoadPersonaSessionsFn.mockReturnValue({
+        'interactive:claude': 'scoped-session-from-claude',
+        interactive: 'legacy-session-from-claude',
+      });
+
+      await executeDefaultAction();
+
+      expect(mockLoadPersonaSessionsFn).toHaveBeenCalledWith('/test/cwd', 'claude');
+      expect(mockInteractiveMode).toHaveBeenCalledWith(
+        '/test/cwd',
+        undefined,
+        expect.anything(),
+        'scoped-session-from-claude',
+        undefined,
+        undefined,
+      );
+    });
+
+    it('should prioritize CLI override over takt_providers.assistant when both are configured', async () => {
+      mockOpts.continue = true;
+      mockResolveAgentOverrides.mockReturnValue({ provider: 'opencode', model: 'cli-model' });
+      mockResolveConfigValuesFn.mockReturnValue({
+        language: 'en',
+        interactivePreviewMovements: 3,
+        provider: 'codex',
+      });
+      mockResolveAssistantConfigLayers.mockReturnValue({
+        local: {
+          provider: 'codex',
+          taktProviders: {
+            assistant: {
+              provider: 'claude',
+              model: 'haiku',
+            },
+          },
+        },
+        global: {},
+      });
+      mockLoadPersonaSessionsFn.mockReturnValue({
+        'interactive:opencode': 'scoped-session-from-opencode',
+        'interactive:claude': 'scoped-session-from-claude',
+        interactive: 'legacy-session-from-claude',
+      });
+
+      await executeDefaultAction();
+
+      expect(mockLoadPersonaSessionsFn).toHaveBeenCalledWith('/test/cwd', 'opencode');
+      expect(mockInteractiveMode).toHaveBeenCalledWith(
+        '/test/cwd',
+        undefined,
+        expect.anything(),
+        'scoped-session-from-opencode',
+        undefined,
+        { provider: 'opencode', model: 'cli-model' },
+      );
+    });
+
+    it('should use local config assistant provider when local config exists', async () => {
+      mockOpts.continue = true;
+      mockResolveConfigValuesFn.mockReturnValue({
+        language: 'en',
+        interactivePreviewMovements: 3,
+        provider: 'mock',
+        model: 'global-top-level-model',
+      });
+      mockResolveAssistantConfigLayers.mockReturnValue({
+        local: {
+          provider: 'opencode',
+          model: 'local-top-level-model',
+          taktProviders: {
+            assistant: {
+              provider: 'codex',
+              model: 'local-assistant-model',
+            },
+          },
+        },
+        global: {
+          provider: 'claude',
+          model: 'global-top-level-model',
+          taktProviders: {
+            assistant: {
+              provider: 'cursor',
+              model: 'global-assistant-model',
+            },
+          },
+        },
+      });
+      mockLoadPersonaSessionsFn.mockReturnValue({
+        'interactive:codex': 'scoped-session-from-codex',
+      });
+
+      await executeDefaultAction();
+
+      expect(mockResolveAssistantConfigLayers).toHaveBeenCalledWith('/test/cwd');
+      expect(mockLoadPersonaSessionsFn).toHaveBeenCalledWith('/test/cwd', 'codex');
+      expect(mockInteractiveMode).toHaveBeenCalledWith(
+        '/test/cwd',
+        undefined,
+        expect.anything(),
+        'scoped-session-from-codex',
+        undefined,
+        undefined,
+      );
     });
   });
 });

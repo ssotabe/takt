@@ -32,23 +32,30 @@ Organized by category.
 | 🔧 Dual | `dual` | Frontend + backend development piece: architecture, frontend, security, QA reviews with fix loops. |
 | | `dual-cqrs` | Frontend + backend development piece (CQRS+ES specialized): CQRS+ES, frontend, security, QA reviews with fix loops. |
 | 🏗️ Infrastructure | `terraform` | Terraform IaC development piece: plan → implement → parallel review → supervisor validation → fix → complete. |
-| 🔍 Review | `review` | Multi-perspective code review: auto-detects PR/branch/working diff, reviews from 5 parallel perspectives (arch/security/QA/testing/requirements), outputs consolidated results. |
-| | `review-fix` | Multi-perspective review + fix loop (architecture, security, QA, testing, requirements — 5 parallel reviewers with iterative fixes). |
-| | `frontend-review` | Frontend-focused review (structure, modularization, component design, security, QA). |
-| | `frontend-review-fix` | Frontend-focused review + fix loop (structure, modularization, component design, security, QA). |
-| | `backend-review` | Backend-focused review (structure, modularization, hexagonal architecture, security, QA). |
-| | `backend-review-fix` | Backend-focused review + fix loop (structure, modularization, hexagonal architecture, security, QA). |
-| | `dual-review` | Frontend + backend focused review (structure, modularization, component design, security, QA). |
-| | `dual-review-fix` | Frontend + backend focused review + fix loop (structure, modularization, component design, security, QA). |
-| | `dual-cqrs-review` | Frontend + CQRS+ES focused review (structure, modularization, domain model, component design, security, QA). |
-| | `dual-cqrs-review-fix` | Frontend + CQRS+ES focused review + fix loop (structure, modularization, domain model, component design, security, QA). |
-| | `backend-cqrs-review` | CQRS+ES focused review (structure, modularization, domain model, security, QA). |
-| | `backend-cqrs-review-fix` | CQRS+ES focused review + fix loop (structure, modularization, domain model, security, QA). |
+| 🔍 Review | `review-default` | Multi-perspective code review: auto-detects PR/branch/working diff, reviews from 5 parallel perspectives (arch/security/QA/testing/requirements), outputs consolidated results. |
+| | `review-fix-default` | Multi-perspective review + fix loop (architecture, security, QA, testing, requirements — 5 parallel reviewers with iterative fixes). |
+| | `review-frontend` | Frontend-focused review (structure, modularization, component design, security, QA). |
+| | `review-fix-frontend` | Frontend-focused review + fix loop (structure, modularization, component design, security, QA). |
+| | `review-backend` | Backend-focused review (structure, modularization, hexagonal architecture, security, QA). |
+| | `review-fix-backend` | Backend-focused review + fix loop (structure, modularization, hexagonal architecture, security, QA). |
+| | `review-dual` | Frontend + backend focused review (structure, modularization, component design, security, QA). |
+| | `review-fix-dual` | Frontend + backend focused review + fix loop (structure, modularization, component design, security, QA). |
+| | `review-dual-cqrs` | Frontend + CQRS+ES focused review (structure, modularization, domain model, component design, security, QA). |
+| | `review-fix-dual-cqrs` | Frontend + CQRS+ES focused review + fix loop (structure, modularization, domain model, component design, security, QA). |
+| | `review-backend-cqrs` | CQRS+ES focused review (structure, modularization, domain model, security, QA). |
+| | `review-fix-backend-cqrs` | CQRS+ES focused review + fix loop (structure, modularization, domain model, security, QA). |
+| | `audit-unit` | Unit test audit. Enumerates behaviors and coverage gaps, produces an issue-ready report without modifying code. |
+| | `audit-e2e` | E2E audit. Enumerates user flows and coverage gaps, produces an issue-ready report without modifying code. |
+| | `audit-security` | Full security audit. Reads every project file for security review. |
+| | `audit-architecture` | Architecture audit. Enumerates modules and boundaries, produces an issue-ready report without modifying code. |
+| | `audit-architecture-frontend` | Frontend-focused architecture audit. Enumerates UI modules and boundaries. |
+| | `audit-architecture-backend` | Backend-focused architecture audit. Enumerates service modules and boundaries. |
+| | `audit-architecture-dual` | Full-stack architecture audit. Enumerates frontend/backend boundaries and cross-layer wiring. |
 | 🧪 Testing | `unit-test` | Unit test focused piece: test analysis -> test implementation -> review -> fix. |
 | | `e2e-test` | E2E test focused piece: E2E analysis -> E2E implementation -> review -> fix (Vitest-based E2E flow). |
 | 🎵 TAKT Development | `takt-default` | TAKT development piece: plan → write tests → implement → AI antipattern review → 5-parallel review → fix → supervise → complete. |
 | | `takt-default-team-leader` | TAKT development piece with team leader: plan → write tests → team-leader implement → AI antipattern review → 5-parallel review → fix → supervise → complete. |
-| | `takt-default-review-fix` | TAKT development code review + fix loop (5 parallel reviewers: architecture, security, QA, testing, requirements — with iterative fixes). |
+| | `review-fix-takt-default` | TAKT development code review + fix loop (5 parallel reviewers: architecture, security, QA, testing, requirements — with iterative fixes). |
 | Others | `research` | Research piece: planner -> digger -> supervisor. Autonomously executes research without asking questions. |
 | | `deep-research` | Deep research piece: plan -> dig -> analyze -> supervise. Discovery-driven investigation that follows emerging questions with multi-perspective analysis. |
 | | `magi` | Deliberation system inspired by Evangelion. Three AI personas (MELCHIOR, BALTHASAR, CASPER) analyze and vote. |

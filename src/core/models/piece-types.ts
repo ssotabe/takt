@@ -87,7 +87,12 @@ export interface OpenCodeProviderOptions {
 }
 
 /** Runtime prepare preset identifiers */
-export type RuntimePreparePreset = 'gradle' | 'node';
+export const RUNTIME_PREPARE_PRESETS = ['gradle', 'node'] as const;
+export type RuntimePreparePreset = (typeof RUNTIME_PREPARE_PRESETS)[number];
+const RUNTIME_PREPARE_PRESET_SET: ReadonlySet<string> = new Set(RUNTIME_PREPARE_PRESETS);
+export function isRuntimePreparePreset(entry: string): entry is RuntimePreparePreset {
+  return RUNTIME_PREPARE_PRESET_SET.has(entry);
+}
 /** Runtime prepare entry: preset name or executable script path */
 export type RuntimePrepareEntry = RuntimePreparePreset | string;
 
@@ -277,12 +282,6 @@ export interface PieceConfig {
   loopDetection?: LoopDetectionConfig;
   /** Loop monitors for detecting cyclic patterns between movements */
   loopMonitors?: LoopMonitorConfig[];
-  /**
-   * Agent to use for answering AskUserQuestion prompts automatically.
-   * When specified, questions from Claude Code are routed to this agent
-   * instead of prompting the user interactively.
-   */
-  answerAgent?: string;
   /** Default interactive mode for this piece (overrides user default) */
   interactiveMode?: InteractiveMode;
   /** Sub-piece configuration (marks this piece as callable from piece_call) */

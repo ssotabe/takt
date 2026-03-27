@@ -228,9 +228,22 @@ Implemented in `src/core/piece/evaluation/RuleEvaluator.ts`. The matched method 
 - `compose(facets, options)` → `ComposedPrompt` (systemPrompt + userMessage)
 - Supports template rendering, context truncation, facet path resolution, scope references
 
-**GitHub Integration** (`src/infra/github/`)
-- `issue.ts` - Fetches issues via `gh` CLI, formats as task text, supports `createIssue()`
-- `pr.ts` - Creates pull requests via `gh` CLI, supports draft PRs and custom templates
+**VCS Integration** (`src/infra/git/`, `src/infra/github/`, `src/infra/gitlab/`)
+- Common VCS layer (`src/infra/git/`):
+  - `types.ts` - `GitProvider` interface defining the VCS contract (CLI check, issue/PR operations)
+  - `index.ts` - Singleton factory with 3-stage resolution: explicit `vcs_provider` config → auto-detection from git remote → GitHub fallback
+  - `detect.ts` - Auto-detects provider from `origin` remote URL hostname (`github.com` → `github`, `gitlab.com` → `gitlab`)
+  - `format.ts` - Provider-neutral formatting utilities for issues and PR review data
+- GitHub provider (`src/infra/github/`):
+  - `GitHubProvider.ts` - `GitProvider` implementation delegating to `gh` CLI
+  - `issue.ts` - Fetches issues via `gh` CLI, formats as task text, supports `createIssue()`
+  - `pr.ts` - Creates pull requests via `gh` CLI, supports draft PRs and custom templates
+- GitLab provider (`src/infra/gitlab/`):
+  - `GitLabProvider.ts` - `GitProvider` implementation delegating to `glab` CLI
+  - `issue.ts` - Fetches issues via `glab` CLI, supports `createIssue()`
+  - `pr.ts` - Creates merge requests via `glab` CLI, fetches MR review comments
+  - `utils.ts` - Shared utilities (`checkGlabCli()`, paginated API fetching with `MAX_PAGES` guard)
+- Configuration: `vcs_provider` field in project/global config (`github` | `gitlab`). When omitted, auto-detected from git remote URL. Self-hosted instances require explicit configuration
 
 ### Data Flow
 
@@ -284,7 +297,6 @@ description: Optional description
 max_movements: 10
 initial_movement: plan    # First movement to execute
 interactive_mode: assistant  # Default interactive mode (assistant|passthrough|quiet|persona)
-answer_agent: agent-name  # Route AskUserQuestion to this agent (optional)
 
 # Piece-level provider options (inherited by all movements unless overridden)
 piece_config:

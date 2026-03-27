@@ -18,7 +18,7 @@ import type { TaskExecutionOptions, ExecuteTaskOptions, PieceExecutionResult } f
 import { runWithWorkerPool } from './parallelExecution.js';
 import { resolveTaskExecution, resolveTaskIssue } from './resolveTask.js';
 import { postExecutionFlow } from './postExecution.js';
-import { buildTaskResult, persistExceededTaskResult, persistTaskError, persistPrFailedTaskResult, persistTaskResult } from './taskResultHandler.js';
+import { buildBooleanTaskResult, buildTaskResult, persistExceededTaskResult, persistTaskError, persistPrFailedTaskResult, persistTaskResult } from './taskResultHandler.js';
 import { generateRunId, toSlackTaskDetail } from './slackSummaryAdapter.js';
 
 export type { TaskExecutionOptions, ExecuteTaskOptions };
@@ -182,8 +182,9 @@ export async function executeAndCompleteTask(
 
     let prUrl: string | undefined;
     let prFailedError: string | undefined;
+    let postExecutionTaskError: string | undefined;
     if (taskSuccess && isWorktree) {
-      const issues = resolveTaskIssue(issueNumber);
+      const issues = resolveTaskIssue(issueNumber, execCwd);
       const postResult = await postExecutionFlow({
         execCwd,
         projectCwd: cwd,
@@ -199,6 +200,24 @@ export async function executeAndCompleteTask(
       if (postResult.prFailed) {
         prFailedError = postResult.prError;
       }
+      if (postResult.taskFailed) {
+        postExecutionTaskError = postResult.taskError;
+      }
+    }
+
+    if (postExecutionTaskError !== undefined) {
+      const taskResult = buildBooleanTaskResult({
+        task,
+        taskSuccess: false,
+        startedAt,
+        completedAt,
+        successResponse: 'Task completed successfully',
+        failureResponse: postExecutionTaskError,
+        branch,
+        worktreePath,
+      });
+      persistTaskResult(taskRunner, taskResult);
+      return false;
     }
 
     const taskResult = buildTaskResult({

@@ -11,6 +11,8 @@ import {
   normalizePieceOverrides,
   normalizePipelineConfig,
   normalizePersonaProviders,
+  normalizeTaktProviders,
+  buildRawTaktProvidersOrThrow,
   normalizeRuntime,
 } from '../configNormalizers.js';
 import { getGlobalConfigPath } from '../paths.js';
@@ -101,6 +103,7 @@ export class GlobalConfigManager {
       worktreeDir: expandOptionalHomePath(parsed.worktree_dir),
       allowGitHooks: parsed.allow_git_hooks,
       allowGitFilters: parsed.allow_git_filters,
+      vcsProvider: parsed.vcs_provider as GlobalConfig['vcsProvider'],
       autoPr: parsed.auto_pr,
       draftPr: parsed.draft_pr,
       disabledBuiltins: parsed.disabled_builtins,
@@ -123,6 +126,22 @@ export class GlobalConfigManager {
       providerOptions: normalizedProvider.providerOptions,
       providerProfiles: normalizeProviderProfiles(parsed.provider_profiles as Record<string, { default_permission_mode: unknown; movement_permission_overrides?: Record<string, unknown> }> | undefined),
       runtime: normalizeRuntime(parsed.runtime),
+      pieceRuntimePrepare: parsed.piece_runtime_prepare ? {
+        customScripts: parsed.piece_runtime_prepare.custom_scripts,
+      } : undefined,
+      pieceArpeggio: parsed.piece_arpeggio ? {
+        customDataSourceModules: parsed.piece_arpeggio.custom_data_source_modules,
+        customMergeInlineJs: parsed.piece_arpeggio.custom_merge_inline_js,
+        customMergeFiles: parsed.piece_arpeggio.custom_merge_files,
+      } : undefined,
+      syncConflictResolver: parsed.sync_conflict_resolver ? {
+        autoApproveTools: parsed.sync_conflict_resolver.auto_approve_tools,
+      } : undefined,
+      pieceMcpServers: parsed.piece_mcp_servers ? {
+        stdio: parsed.piece_mcp_servers.stdio,
+        sse: parsed.piece_mcp_servers.sse,
+        http: parsed.piece_mcp_servers.http,
+      } : undefined,
       preventSleep: parsed.prevent_sleep,
       notificationSound: parsed.notification_sound,
       notificationSoundEvents: parsed.notification_sound_events ? {
@@ -146,6 +165,14 @@ export class GlobalConfigManager {
       pipeline: normalizePipelineConfig(
         parsed.pipeline as { default_branch_prefix?: string; commit_message_template?: string; pr_body_template?: string } | undefined,
       ),
+      taktProviders: normalizeTaktProviders(
+        parsed.takt_providers as {
+          assistant?: {
+            provider?: GlobalConfig['provider'];
+            model?: string;
+          };
+        } | undefined,
+      ),
       personaProviders: normalizePersonaProviders(
         parsed.persona_providers as Record<string, string | { type?: string; provider?: string; model?: string }> | undefined,
       ),
@@ -163,6 +190,11 @@ export class GlobalConfigManager {
   save(config: GlobalConfig): void {
     const configPath = getGlobalConfigPath();
     const raw = serializeGlobalConfig(config);
+
+    const rawTaktProviders = buildRawTaktProvidersOrThrow(config.taktProviders);
+    if (rawTaktProviders) {
+      raw.takt_providers = rawTaktProviders;
+    }
     writeFileSync(configPath, stringifyYaml(raw), 'utf-8');
     this.invalidateCache();
     invalidateAllResolvedConfigCache();

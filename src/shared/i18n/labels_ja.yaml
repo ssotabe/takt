@@ -19,7 +19,7 @@ interactive:
     actionPrompt: "どうしますか？"
     actions:
       execute: "実行する"
-      createIssue: "GitHub Issueを建てる"
+      createIssue: "Issueを建てる"
       saveTask: "タスクにつむ"
       continue: "会話を続ける"
     cancelled: "キャンセルしました"

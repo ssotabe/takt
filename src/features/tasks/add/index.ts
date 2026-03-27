@@ -13,8 +13,8 @@ import type { Language } from '../../../core/models/types.js';
 import { TaskRunner, type TaskFileData, summarizeTaskName } from '../../../infra/task/index.js';
 import { determinePiece } from '../execute/selectAndExecute.js';
 import { createLogger, getErrorMessage, generateReportDir } from '../../../shared/utils/index.js';
-import { isIssueReference, resolveIssueTask, parseIssueNumbers, formatPrReviewAsTask } from '../../../infra/github/index.js';
-import { getGitProvider, type PrReviewData } from '../../../infra/git/index.js';
+import { isIssueReference, resolveIssueTask, parseIssueNumbers, formatPrReviewAsTask, getGitProvider } from '../../../infra/git/index.js';
+import type { PrReviewData } from '../../../infra/git/index.js';
 import { firstLine } from '../../../infra/task/naming.js';
 import { extractTitle, createIssueFromTask } from './issueTask.js';
 import { displayTaskCreationResult, promptWorktreeSettings, type WorktreeSettings } from './worktree-settings.js';
@@ -84,7 +84,7 @@ export async function saveTaskFile(
 
 
 /**
- * Prompt user to select a label for the GitHub Issue.
+ * Prompt user to select a label for the issue.
  *
  * Presents 4 fixed options: None, bug, enhancement, custom input.
  * Returns an array of selected labels (empty if none selected).
@@ -137,7 +137,7 @@ export async function createIssueAndSaveTask(
   piece?: string,
   options?: { confirmAtEndMessage?: string; labels?: string[] },
 ): Promise<void> {
-  const issueNumber = createIssueFromTask(task, { labels: options?.labels });
+  const issueNumber = createIssueFromTask(task, { labels: options?.labels, cwd });
   if (issueNumber === undefined) {
     return;
   }
@@ -167,9 +167,9 @@ export async function addTask(
 
   if (prNumber !== undefined) {
     const provider = getGitProvider();
-    const ghStatus = provider.checkCliStatus();
-    if (!ghStatus.available) {
-      error(ghStatus.error ?? 'GitHub CLI is unavailable');
+    const cliStatus = provider.checkCliStatus(cwd);
+    if (!cliStatus.available) {
+      error(cliStatus.error);
       return;
     }
 
@@ -178,7 +178,7 @@ export async function addTask(
       prReview = await withProgress(
         'Fetching PR review comments...',
         (fetchedPrReview: PrReviewData) => `PR fetched: #${fetchedPrReview.number} ${fetchedPrReview.title}`,
-        async () => provider.fetchPrReviewComments(prNumber),
+        async () => provider.fetchPrReviewComments(prNumber, cwd),
       );
     } catch (e) {
       const msg = getErrorMessage(e);
@@ -222,16 +222,16 @@ export async function addTask(
       const numbers = parseIssueNumbers([trimmedTask]);
       const primaryIssueNumber = numbers[0];
       taskContent = await withProgress(
-        'Fetching GitHub Issue...',
-        primaryIssueNumber ? `GitHub Issue fetched: #${primaryIssueNumber}` : 'GitHub Issue fetched',
-        async () => resolveIssueTask(trimmedTask),
+        'Fetching issue...',
+        primaryIssueNumber ? `Issue fetched: #${primaryIssueNumber}` : 'Issue fetched',
+        async () => resolveIssueTask(trimmedTask, cwd),
       );
       if (numbers.length > 0) {
         issueNumber = numbers[0];
       }
     } catch (e) {
       const msg = getErrorMessage(e);
-      log.error('Failed to fetch GitHub Issue', { task: trimmedTask, error: msg });
+      log.error('Failed to fetch issue', { task: trimmedTask, error: msg });
       info(`Failed to fetch issue ${trimmedTask}: ${msg}`);
       return;
     }

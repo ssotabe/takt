@@ -9,6 +9,8 @@ import { DEFAULT_LANGUAGE } from '../../shared/constants.js';
 import { McpServersSchema } from './mcp-schemas.js';
 import { INTERACTIVE_MODES } from './interactive-mode.js';
 import { STATUS_VALUES } from './status.js';
+import { VCS_PROVIDER_TYPES } from './vcs-types.js';
+import { RUNTIME_PREPARE_PRESETS } from './piece-types.js';
 
 export { McpServerConfigSchema, McpServersSchema } from './mcp-schemas.js';
 
@@ -131,7 +133,7 @@ export const ProviderPermissionProfilesSchema = z.object({
 }).optional();
 
 /** Runtime prepare preset identifiers */
-export const RuntimePreparePresetSchema = z.enum(['gradle', 'node']);
+export const RuntimePreparePresetSchema = z.enum(RUNTIME_PREPARE_PRESETS);
 /** Runtime prepare entry: preset name or script path */
 export const RuntimePrepareEntrySchema = z.union([
   RuntimePreparePresetSchema,
@@ -350,7 +352,7 @@ export const ParallelSubMovementRawSchema = z.object({
   provider_options: MovementProviderOptionsSchema,
   edit: z.boolean().optional(),
   instruction: z.string().optional(),
-  instruction_template: z.string().optional(),
+  instruction_template: z.never().optional(),
   rules: z.array(PieceRuleSchema).optional(),
   /** Output contracts for this movement (report definitions) */
   output_contracts: OutputContractsFieldSchema,
@@ -395,7 +397,7 @@ export const PieceMovementRawSchema = z.object({
   /** Whether this movement is allowed to edit project files */
   edit: z.boolean().optional(),
   instruction: z.string().optional(),
-  instruction_template: z.string().optional(),
+  instruction_template: z.never().optional(),
   /** Rules for movement routing */
   rules: z.array(PieceRuleSchema).optional(),
   /** Output contracts for this movement (report definitions) */
@@ -443,8 +445,7 @@ export const LoopMonitorJudgeSchema = z.object({
   persona: z.string().optional(),
   /** Custom judge instruction */
   instruction: z.string().optional(),
-  /** Deprecated alias */
-  instruction_template: z.string().optional(),
+  instruction_template: z.never().optional(),
   /** Rules for the judge's decision */
   rules: z.array(LoopMonitorRuleSchema).min(1),
 });
@@ -483,7 +484,6 @@ export const PieceConfigRawSchema = z.object({
   initial_movement: z.string().optional(),
   max_movements: z.number().int().positive().optional().default(10),
   loop_monitors: z.array(LoopMonitorSchema).optional(),
-  answer_agent: z.string().optional(),
   /** Default interactive mode for this piece (overrides user default) */
   interactive_mode: InteractiveModeSchema.optional(),
   /** Sub-piece configuration (marks this piece as callable from piece_call) */
@@ -508,6 +508,21 @@ export const PersonaProviderReferenceSchema = z.union([
   PersonaProviderBlockSchema,
   PersonaProviderEntrySchema,
 ]);
+
+export const TaktProviderEntrySchema = z.object({
+  provider: ProviderTypeSchema.optional(),
+  model: z.string().optional(),
+}).strict().refine(
+  (entry) => entry.provider !== undefined || entry.model !== undefined,
+  { message: "takt_providers.assistant must include either 'provider' or 'model'" }
+);
+
+export const TaktProvidersSchema = z.object({
+  assistant: TaktProviderEntrySchema.optional(),
+}).strict().refine(
+  (entry) => entry.assistant !== undefined,
+  { message: "takt_providers must include 'assistant'" }
+);
 
 /** Custom agent configuration schema */
 export const CustomAgentConfigSchema = z.object({
@@ -547,6 +562,27 @@ export const PipelineConfigSchema = z.object({
   pr_body_template: z.string().optional(),
 }).strict();
 
+export const PieceRuntimePrepareConfigSchema = z.object({
+  custom_scripts: z.boolean().optional(),
+}).strict();
+
+export const PieceArpeggioConfigSchema = z.object({
+  custom_data_source_modules: z.boolean().optional(),
+  custom_merge_inline_js: z.boolean().optional(),
+  custom_merge_files: z.boolean().optional(),
+}).strict();
+
+export const SyncConflictResolverConfigSchema = z.object({
+  auto_approve_tools: z.boolean().optional(),
+}).strict();
+
+export const PieceMcpServersConfigSchema = z.object({
+  stdio: z.boolean().optional(),
+  sse: z.boolean().optional(),
+  http: z.boolean().optional(),
+}).strict();
+
+
 /** Piece category config schema (recursive) */
 export type PieceCategoryConfigNode = {
   pieces?: string[];
@@ -563,6 +599,7 @@ export const PieceCategoryConfigSchema = z.record(z.string(), PieceCategoryConfi
 
 /** Project config schema */
 export const ProjectConfigSchema = z.object({
+  language: LanguageSchema.optional(),
   provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
   analytics: AnalyticsConfigSchema.optional(),
@@ -575,6 +612,7 @@ export const ProjectConfigSchema = z.object({
   /** Create PR as draft (project override) */
   draft_pr: z.boolean().optional(),
   pipeline: PipelineConfigSchema.optional(),
+  takt_providers: TaktProvidersSchema.optional(),
   persona_providers: z.record(z.string(), PersonaProviderReferenceSchema).optional(),
   branch_name_strategy: z.enum(['romaji', 'ai']).optional(),
   minimal_output: z.boolean().optional(),
@@ -582,6 +620,14 @@ export const ProjectConfigSchema = z.object({
   provider_profiles: ProviderPermissionProfilesSchema,
   /** Project-level runtime environment configuration */
   runtime: RuntimeConfigSchema,
+  /** Piece-level runtime.prepare policy */
+  piece_runtime_prepare: PieceRuntimePrepareConfigSchema.optional(),
+  /** Piece-level Arpeggio policy */
+  piece_arpeggio: PieceArpeggioConfigSchema.optional(),
+  /** Sync conflict resolver behavior */
+  sync_conflict_resolver: SyncConflictResolverConfigSchema.optional(),
+  /** Piece-level MCP transport policy */
+  piece_mcp_servers: PieceMcpServersConfigSchema.optional(),
   /** Number of tasks to run concurrently in takt run (default from global: 1, max: 10) */
   concurrency: z.number().int().min(1).max(10).optional(),
   /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
@@ -592,6 +638,8 @@ export const ProjectConfigSchema = z.object({
   base_branch: z.string().optional(),
   /** Piece-level overrides (quality_gates, etc.) */
   piece_overrides: PieceOverridesSchema,
+  /** VCS provider selection (github or gitlab) */
+  vcs_provider: z.enum(VCS_PROVIDER_TYPES).optional(),
   /** Submodule acquisition mode (all or explicit path list) */
   submodules: z.union([
     z.string().refine((value) => value.trim().toLowerCase() === 'all', {

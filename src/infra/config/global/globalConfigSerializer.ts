@@ -46,6 +46,9 @@ export function serializeGlobalConfig(config: GlobalConfig): Record<string, unkn
   if (config.allowGitFilters !== undefined) {
     raw.allow_git_filters = config.allowGitFilters;
   }
+  if (config.vcsProvider !== undefined) {
+    raw.vcs_provider = config.vcsProvider;
+  }
   if (config.autoPr !== undefined) {
     raw.auto_pr = config.autoPr;
   }
@@ -115,6 +118,26 @@ export function serializeGlobalConfig(config: GlobalConfig): Record<string, unkn
     raw.runtime = {
       prepare: [...new Set(config.runtime.prepare)],
     };
+  }
+  if (config.pieceRuntimePrepare) {
+    raw.piece_runtime_prepare = {
+      custom_scripts: config.pieceRuntimePrepare.customScripts,
+    };
+  }
+  if (config.pieceArpeggio) {
+    raw.piece_arpeggio = {
+      custom_data_source_modules: config.pieceArpeggio.customDataSourceModules,
+      custom_merge_inline_js: config.pieceArpeggio.customMergeInlineJs,
+      custom_merge_files: config.pieceArpeggio.customMergeFiles,
+    };
+  }
+  if (config.syncConflictResolver) {
+    raw.sync_conflict_resolver = {
+      auto_approve_tools: config.syncConflictResolver.autoApproveTools,
+    };
+  }
+  if (config.pieceMcpServers && Object.keys(config.pieceMcpServers).length > 0) {
+    raw.piece_mcp_servers = config.pieceMcpServers;
   }
   if (config.preventSleep !== undefined) {
     raw.prevent_sleep = config.preventSleep;

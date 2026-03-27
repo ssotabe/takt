@@ -22,6 +22,14 @@
 ### Implementation Approach
 {How to proceed}
 
+### Reachability and Launch Conditions (when adding/changing user-facing features)
+| Item | Content |
+|------|---------|
+| User entry point | {Menu/route/button/link/external caller, or explicitly say "none"} |
+| Callers/wiring to update | {Files or layers that must be updated} |
+| Launch conditions | {Auth, permission, URL condition, flags, etc.} |
+| Remaining gaps | {Any unresolved wiring, or "none"} |
+
 ## Implementation Guidelines (only when design is needed)
 - {Guidelines the Coder should follow during implementation}
 

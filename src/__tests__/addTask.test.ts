@@ -47,14 +47,6 @@ vi.mock('../infra/task/clone-base-branch.js', () => ({
   branchExists: vi.fn(),
 }));
 
-vi.mock('../infra/git/index.js', () => ({
-  getGitProvider: () => ({
-    createIssue: vi.fn(),
-    checkCliStatus: (...args: unknown[]) => mockCheckCliStatus(...args),
-    fetchPrReviewComments: (...args: unknown[]) => mockFetchPrReviewComments(...args),
-  }),
-}));
-
 const mockIsIssueReference = vi.fn((s: string) => /^#\d+$/.test(s));
 const mockResolveIssueTask = vi.fn();
 const mockParseIssueNumbers = vi.fn((args: string[]) => {
@@ -69,7 +61,12 @@ const mockParseIssueNumbers = vi.fn((args: string[]) => {
 });
 const mockFormatPrReviewAsTask = vi.fn();
 
-vi.mock('../infra/github/index.js', () => ({
+vi.mock('../infra/git/index.js', () => ({
+  getGitProvider: () => ({
+    createIssue: vi.fn(),
+    checkCliStatus: (...args: unknown[]) => mockCheckCliStatus(...args),
+    fetchPrReviewComments: (...args: unknown[]) => mockFetchPrReviewComments(...args),
+  }),
   isIssueReference: (...args: unknown[]) => mockIsIssueReference(...args),
   resolveIssueTask: (...args: unknown[]) => mockResolveIssueTask(...args),
   parseIssueNumbers: (...args: unknown[]) => mockParseIssueNumbers(...args),
@@ -243,7 +240,7 @@ describe('addTask', () => {
     expect(mockInteractiveMode).not.toHaveBeenCalled();
     expect(mockIsIssueReference).toHaveBeenCalledWith('#99');
     expect(mockParseIssueNumbers).toHaveBeenCalledWith(['#99']);
-    expect(mockResolveIssueTask).toHaveBeenCalledWith('#99');
+    expect(mockResolveIssueTask).toHaveBeenCalledWith('#99', testDir);
     expect(mockCheckCliStatus).not.toHaveBeenCalled();
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.content).toBeUndefined();
@@ -259,11 +256,11 @@ describe('addTask', () => {
 
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
-    expect(mockCheckCliStatus).toHaveBeenCalled();
+    expect(mockCheckCliStatus).toHaveBeenCalledWith(testDir);
     expect(mockCheckCliStatus.mock.invocationCallOrder[0]).toBeLessThan(
       mockFetchPrReviewComments.mock.invocationCallOrder[0],
     );
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).toHaveBeenCalledWith(prReview);
     expect(mockIsIssueReference).not.toHaveBeenCalled();
     expect(mockParseIssueNumbers).not.toHaveBeenCalled();
@@ -299,7 +296,7 @@ describe('addTask', () => {
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).not.toHaveBeenCalled();
     expect(mockDeterminePiece).not.toHaveBeenCalled();
     expect(mockError).toHaveBeenCalled();
@@ -312,7 +309,7 @@ describe('addTask', () => {
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).not.toHaveBeenCalled();
     expect(mockDeterminePiece).not.toHaveBeenCalled();
     expect(mockError).toHaveBeenCalledWith(expect.stringContaining('network timeout'));
@@ -344,7 +341,7 @@ describe('addTask', () => {
     expect(mockParseIssueNumbers).not.toHaveBeenCalled();
     expect(mockResolveIssueTask).not.toHaveBeenCalled();
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).toHaveBeenCalledWith(prReview);
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.content).toBeUndefined();
@@ -370,7 +367,7 @@ describe('addTask', () => {
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).toHaveBeenCalledWith(prReview);
     expect(mockDeterminePiece).toHaveBeenCalledTimes(1);
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);

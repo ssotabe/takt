@@ -11,16 +11,18 @@
  */
 
 import type { Language } from '../../core/models/index.js';
+import type { ProviderType } from '../../infra/providers/index.js';
 import {
   type SessionState,
 } from '../../infra/config/index.js';
 import { getLabel, getLabelObject } from '../../shared/i18n/index.js';
 import { loadTemplate } from '../../shared/prompts/index.js';
 import {
-  initializeSession,
   displayAndClearSessionState,
   runConversationLoop,
 } from './conversationLoop.js';
+import { buildInteractivePolicyPrompt } from './policyPrompt.js';
+import { initializeSession } from './sessionInitialization.js';
 import {
   type PieceContext,
   formatMovementPreviews,
@@ -120,6 +122,10 @@ export {
 export interface InteractiveModeOptions {
   /** Actions to exclude from the post-summary action selector. */
   excludeActions?: readonly SummaryActionValue[];
+  /** CLI provider override for assistant mode */
+  provider?: ProviderType;
+  /** CLI model override for assistant mode */
+  model?: string;
 }
 
 export async function interactiveMode(
@@ -130,7 +136,10 @@ export async function interactiveMode(
   runSessionContext?: RunSessionContext,
   options?: InteractiveModeOptions,
 ): Promise<InteractiveModeResult> {
-  const baseCtx = initializeSession(cwd, 'interactive');
+  const baseCtx = initializeSession(cwd, 'interactive', {
+    provider: options?.provider,
+    model: options?.model,
+  });
   const ctx = sessionId ? { ...baseCtx, sessionId } : baseCtx;
 
   displayAndClearSessionState(cwd, ctx.lang);
@@ -148,22 +157,7 @@ export async function interactiveMode(
     hasRunSession,
     ...runPromptVars,
   });
-  const policyContent = loadTemplate('score_interactive_policy', ctx.lang, {});
   const ui = getLabelObject<InteractiveUIText>('interactive.ui', ctx.lang);
-
-  /**
-   * Inject policy into user message for AI call.
-   * Follows the same pattern as piece execution (perform_phase1_message.md).
-   */
-  function injectPolicy(userMessage: string): string {
-    const policyIntro = ctx.lang === 'ja'
-      ? '以下のポリシーは行動規範です。必ず遵守してください。'
-      : 'The following policy defines behavioral guidelines. Please follow them.';
-    const reminderLabel = ctx.lang === 'ja'
-      ? '上記の Policy セクションで定義されたポリシー規範を遵守してください。'
-      : 'Please follow the policy guidelines defined in the Policy section above.';
-    return `## Policy\n${policyIntro}\n\n${policyContent}\n\n---\n\n${userMessage}\n\n---\n**Policy Reminder:** ${reminderLabel}`;
-  }
 
   const excludeActions = options?.excludeActions;
   const selectAction = excludeActions?.length
@@ -188,7 +182,7 @@ export async function interactiveMode(
   return runConversationLoop(cwd, ctx, {
     systemPrompt,
     allowedTools: DEFAULT_INTERACTIVE_TOOLS,
-    transformPrompt: injectPolicy,
+    transformPrompt: (userMessage: string) => buildInteractivePolicyPrompt(ctx.lang, userMessage),
     introMessage: ui.intro,
     selectAction,
   }, pieceContext, initialInput);

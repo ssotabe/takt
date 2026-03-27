@@ -22,12 +22,14 @@ const {
   mockFormatIssueAsTask,
   mockCheckGhCli,
   mockCreatePullRequest,
+  mockCreatePullRequestSafely,
   mockPushBranch,
 } = vi.hoisted(() => ({
   mockFetchIssue: vi.fn(),
   mockFormatIssueAsTask: vi.fn(),
   mockCheckGhCli: vi.fn(),
   mockCreatePullRequest: vi.fn(),
+  mockCreatePullRequestSafely: vi.fn(),
   mockPushBranch: vi.fn(),
 }));
 
@@ -51,15 +53,16 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
-vi.mock('../infra/github/issue.js', () => ({
-  fetchIssue: mockFetchIssue,
-  formatIssueAsTask: mockFormatIssueAsTask,
-  checkGhCli: mockCheckGhCli,
-}));
-
-vi.mock('../infra/github/pr.js', () => ({
-  createPullRequest: mockCreatePullRequest,
+vi.mock('../infra/git/index.js', () => ({
+  getGitProvider: () => ({
+    checkCliStatus: (...args: unknown[]) => mockCheckGhCli(...args),
+    fetchIssue: (...args: unknown[]) => mockFetchIssue(...args),
+    createPullRequest: (...args: unknown[]) => mockCreatePullRequest(...args),
+  }),
+  formatIssueAsTask: (...args: unknown[]) => mockFormatIssueAsTask(...args),
   buildPrBody: vi.fn().mockReturnValue('PR body'),
+  formatPrReviewAsTask: vi.fn(),
+  createPullRequestSafely: (...args: unknown[]) => mockCreatePullRequestSafely(...args),
 }));
 
 vi.mock('../infra/task/git.js', () => ({
@@ -223,6 +226,16 @@ describe('Pipeline Modes IT: --task + --piece path', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreatePullRequestSafely.mockImplementation((provider, options, cwd) => {
+      try {
+        return provider.createPullRequest(options, cwd);
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
     const setup = createTestPieceDir();
     testDir = setup.dir;
     piecePath = setup.piecePath;
@@ -353,7 +366,7 @@ describe('Pipeline Modes IT: --issue', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(mockFetchIssue).toHaveBeenCalledWith(42);
+    expect(mockFetchIssue).toHaveBeenCalledWith(42, testDir);
   });
 
   it('should return EXIT_ISSUE_FETCH_FAILED when gh CLI unavailable', async () => {

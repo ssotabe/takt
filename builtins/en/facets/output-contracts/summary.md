@@ -12,9 +12,6 @@ Completed
 |------|------|----------|
 | Create | `src/file.ts` | Brief description |
 
-## Verification Commands
-```bash
-npm test
-npm run build
-```
+## Verification Evidence
+- {Evidence for tests/builds/functional checks}
 ```

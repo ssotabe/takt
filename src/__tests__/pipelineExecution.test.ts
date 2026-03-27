@@ -2,26 +2,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockFetchIssue = vi.fn();
 const mockCheckGhCli = vi.fn().mockReturnValue({ available: true });
-vi.mock('../infra/github/issue.js', () => ({
-  fetchIssue: mockFetchIssue,
-  formatIssueAsTask: vi.fn((issue: { title: string; body: string; number: number }) =>
-    `## GitHub Issue #${issue.number}: ${issue.title}\n\n${issue.body}`
-  ),
-  checkGhCli: mockCheckGhCli,
-}));
-
 const mockCreatePullRequest = vi.fn();
+const mockCreatePullRequestSafely = vi.fn();
 const mockPushBranch = vi.fn();
 const mockBuildPrBody = vi.fn(() => 'Default PR body');
 const mockFetchPrReviewComments = vi.fn();
 const mockFormatPrReviewAsTask = vi.fn((pr: { number: number; title: string }) =>
   `## PR #${pr.number} Review Comments: ${pr.title}`
 );
-vi.mock('../infra/github/pr.js', () => ({
-  createPullRequest: mockCreatePullRequest,
-  buildPrBody: mockBuildPrBody,
-  fetchPrReviewComments: (...args: unknown[]) => mockFetchPrReviewComments(...args),
+
+vi.mock('../infra/git/index.js', () => ({
+  getGitProvider: () => ({
+    checkCliStatus: (...args: unknown[]) => mockCheckGhCli(...args),
+    fetchIssue: (...args: unknown[]) => mockFetchIssue(...args),
+    createPullRequest: (...args: unknown[]) => mockCreatePullRequest(...args),
+    fetchPrReviewComments: (...args: unknown[]) => mockFetchPrReviewComments(...args),
+  }),
+  formatIssueAsTask: vi.fn((issue: { title: string; body: string; number: number }) =>
+    `## Issue #${issue.number}: ${issue.title}\n\n${issue.body}`
+  ),
+  buildPrBody: (...args: unknown[]) => mockBuildPrBody(...args),
   formatPrReviewAsTask: (...args: unknown[]) => mockFormatPrReviewAsTask(...args),
+  createPullRequestSafely: (...args: unknown[]) => mockCreatePullRequestSafely(...args),
 }));
 
 vi.mock('../infra/task/git.js', async (importOriginal) => ({
@@ -86,6 +88,16 @@ const { executePipeline } = await import('../features/pipeline/index.js');
 describe('executePipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreatePullRequestSafely.mockImplementation((provider, options, cwd) => {
+      try {
+        return provider.createPullRequest(options, cwd);
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
     // Default: no Slack webhook
     mockGetSlackWebhookUrl.mockReturnValue(undefined);
     // Default: git operations succeed
@@ -208,6 +220,22 @@ describe('executePipeline', () => {
     expect(exitCode).toBe(5);
   });
 
+  it('should return exit code 5 when createPullRequest throws', async () => {
+    mockExecuteTask.mockResolvedValueOnce(true);
+    mockCreatePullRequest.mockImplementationOnce(() => {
+      throw new Error('--repo is not supported with GitLab provider. Use cwd context instead.');
+    });
+
+    const exitCode = await executePipeline({
+      task: 'Fix the bug',
+      piece: 'default',
+      autoPr: true,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(5);
+  });
+
   it('should create PR with correct branch when --auto-pr', async () => {
     mockExecuteTask.mockResolvedValueOnce(true);
     mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/test/pr/1' });
@@ -223,11 +251,11 @@ describe('executePipeline', () => {
 
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/tmp/test',
       expect.objectContaining({
         branch: 'fix/my-branch',
         repo: 'owner/repo',
       }),
+      '/tmp/test',
     );
   });
 
@@ -246,8 +274,8 @@ describe('executePipeline', () => {
 
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/tmp/test',
       expect.objectContaining({ draft: true }),
+      '/tmp/test',
     );
   });
 
@@ -266,8 +294,8 @@ describe('executePipeline', () => {
 
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/tmp/test',
       expect.objectContaining({ draft: false }),
+      '/tmp/test',
     );
   });
 
@@ -294,7 +322,7 @@ describe('executePipeline', () => {
     // Then
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
-    const prOptions = mockCreatePullRequest.mock.calls[0]?.[1] as { branch?: string; base?: string };
+    const prOptions = mockCreatePullRequest.mock.calls[0]?.[0] as { branch?: string; base?: string };
     expect(prOptions.branch).toBe('fix/my-branch');
     expect(prOptions.base).toBe('develop');
     expect(prOptions.base).not.toBeUndefined();
@@ -414,10 +442,10 @@ describe('executePipeline', () => {
       // When prBodyTemplate is set, buildPrBody (mock) should NOT be called
       // Instead, the template is expanded directly
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           body: '## Summary\nAuth is broken.\n\nCloses #50',
         }),
+        '/tmp/test',
       );
     });
 
@@ -436,10 +464,10 @@ describe('executePipeline', () => {
       // Should use buildPrBody (the mock)
       expect(mockBuildPrBody).toHaveBeenCalled();
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           body: 'Default PR body',
         }),
+        '/tmp/test',
       );
     });
   });
@@ -710,11 +738,11 @@ describe('executePipeline', () => {
 
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           branch: 'fix/the-bug',
           base: 'main',
         }),
+        '/tmp/test',
       );
     });
 
@@ -739,11 +767,11 @@ describe('executePipeline', () => {
 
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           branch: 'fix/the-bug',
           base: 'release/main',
         }),
+        '/tmp/test',
       );
     });
 
@@ -926,7 +954,7 @@ describe('executePipeline', () => {
       });
 
       expect(exitCode).toBe(0);
-      expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+      expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, '/tmp/test');
       expect(mockFormatPrReviewAsTask).toHaveBeenCalled();
       // PR branch checkout
       const checkoutCall = mockExecFileSync.mock.calls.find(
@@ -1053,7 +1081,7 @@ describe('executePipeline', () => {
       // Then
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
-      const prOptions = mockCreatePullRequest.mock.calls[0]?.[1] as { base?: string };
+      const prOptions = mockCreatePullRequest.mock.calls[0]?.[0] as { base?: string };
       expect(prOptions.base).toBe('release/main');
       expect(prOptions.base).not.toBeUndefined();
       expect(prOptions.base).not.toBe('develop');
@@ -1089,7 +1117,7 @@ describe('executePipeline', () => {
 
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
-      const prOptions = mockCreatePullRequest.mock.calls[0]?.[1] as { base?: string };
+      const prOptions = mockCreatePullRequest.mock.calls[0]?.[0] as { base?: string };
       expect(prOptions.base).toBe('develop');
       expect(prOptions.base).not.toBeUndefined();
     });

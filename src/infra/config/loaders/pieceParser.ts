@@ -26,8 +26,9 @@ import {
 
 type RawStep = z.output<typeof PieceMovementRawSchema>;
 import type { MovementProviderOptions } from '../../../core/models/piece-types.js';
+import { isRuntimePreparePreset } from '../../../core/models/piece-types.js';
 import { normalizeRuntime } from '../configNormalizers.js';
-import type { PieceOverrides } from '../../../core/models/config-types.js';
+import type { PieceArpeggioConfig, PieceMcpServersConfig, PieceOverrides, PieceRuntimePrepareConfig } from '../../../core/models/config-types.js';
 import { applyQualityGateOverrides } from './qualityGateOverrides.js';
 import { loadProjectConfig } from '../project/projectConfig.js';
 import { loadGlobalConfig } from '../global/globalConfig.js';
@@ -241,6 +242,8 @@ function normalizeStepFromRaw(
   context?: FacetResolutionContext,
   projectOverrides?: PieceOverrides,
   globalOverrides?: PieceOverrides,
+  pieceArpeggioPolicy?: PieceArpeggioConfig,
+  pieceMcpServersPolicy?: PieceMcpServersConfig,
 ): PieceMovement {
   const rules: PieceRule[] | undefined = step.rules?.map(normalizeRule);
 
@@ -272,12 +275,8 @@ function normalizeStepFromRaw(
   const expandedInstruction = step.instruction
     ? resolveRefToContent(step.instruction, sections.resolvedInstructions, pieceDir, 'instructions', context)
     : undefined;
-  if (step.instruction_template !== undefined) {
-    console.warn(`Movement "${step.name}" uses deprecated field "instruction_template". Use "instruction" instead.`);
-  }
-  const expandedLegacyInstruction = step.instruction_template
-    ? resolveRefToContent(step.instruction_template, sections.resolvedInstructions, pieceDir, 'instructions', context)
-    : undefined;
+  validatePieceArpeggio(step.name, step.arpeggio, pieceArpeggioPolicy);
+  validatePieceMcpServers(step.name, step.mcp_servers, pieceMcpServersPolicy);
 
   // piece_call kind/call normalization
   const rawKind = (step as Record<string, unknown>).kind as string | undefined;
@@ -319,7 +318,7 @@ function normalizeStepFromRaw(
     requiredPermissionMode: step.required_permission_mode,
     providerOptions: mergeProviderOptions(inheritedProviderOptions, normalizedProvider.providerOptions),
     edit: step.edit,
-    instruction: normalizedKind === 'piece_call' ? '' : (expandedInstruction || expandedLegacyInstruction || '{task}'),
+    instruction: normalizedKind === 'piece_call' ? '' : (expandedInstruction || '{task}'),
     rules,
     outputContracts: normalizeOutputContracts(step.output_contracts, pieceDir, sections.resolvedReportFormats, context),
     qualityGates: applyQualityGateOverrides(
@@ -348,6 +347,8 @@ function normalizeStepFromRaw(
         context,
         projectOverrides,
         globalOverrides,
+        pieceArpeggioPolicy,
+        pieceMcpServersPolicy,
       ),
     );
   }
@@ -373,20 +374,15 @@ function normalizeStepFromRaw(
 
 /** Normalize a raw loop monitor judge from YAML into internal format. */
 function normalizeLoopMonitorJudge(
-  raw: { persona?: string; instruction?: string; instruction_template?: string; rules: Array<{ condition: string; next: string }> },
+  raw: { persona?: string; instruction?: string; rules: Array<{ condition: string; next: string }> },
   pieceDir: string,
   sections: PieceSections,
   context?: FacetResolutionContext,
 ): LoopMonitorJudge {
   const { personaSpec, personaPath } = resolvePersona(raw.persona, sections, pieceDir, context);
-  if (raw.instruction_template !== undefined) {
-    console.warn('loop_monitors judge uses deprecated field "instruction_template". Use "instruction" instead.');
-  }
   const resolvedInstruction = raw.instruction
     ? resolveRefToContent(raw.instruction, sections.resolvedInstructions, pieceDir, 'instructions', context)
-    : raw.instruction_template
-      ? resolveRefToContent(raw.instruction_template, sections.resolvedInstructions, pieceDir, 'instructions', context)
-      : undefined;
+    : undefined;
 
   return {
     persona: personaSpec,
@@ -400,7 +396,7 @@ function normalizeLoopMonitorJudge(
  * Normalize raw loop monitors from YAML into internal format.
  */
 function normalizeLoopMonitors(
-  raw: Array<{ cycle: string[]; threshold: number; judge: { persona?: string; instruction?: string; instruction_template?: string; rules: Array<{ condition: string; next: string }> } }> | undefined,
+  raw: Array<{ cycle: string[]; threshold: number; judge: { persona?: string; instruction?: string; rules: Array<{ condition: string; next: string }> } }> | undefined,
   pieceDir: string,
   sections: PieceSections,
   context?: FacetResolutionContext,
@@ -420,6 +416,9 @@ export function normalizePieceConfig(
   context?: FacetResolutionContext,
   projectOverrides?: PieceOverrides,
   globalOverrides?: PieceOverrides,
+  pieceRuntimePreparePolicy?: PieceRuntimePrepareConfig,
+  pieceArpeggioPolicy?: PieceArpeggioConfig,
+  pieceMcpServersPolicy?: PieceMcpServersConfig,
 ): PieceConfig {
   const parsed = PieceConfigRawSchema.parse(raw);
 
@@ -445,9 +444,22 @@ export function normalizePieceConfig(
   const pieceModel = normalizedPieceProvider.model;
   const pieceProviderOptions = normalizedPieceProvider.providerOptions;
   const pieceRuntime = normalizeRuntime(parsed.piece_config?.runtime);
+  validatePieceRuntimePrepare(pieceRuntime, pieceRuntimePreparePolicy);
 
   const movements: PieceMovement[] = parsed.movements.map((step) =>
-    normalizeStepFromRaw(step, pieceDir, sections, pieceProvider, pieceModel, pieceProviderOptions, context, projectOverrides, globalOverrides),
+    normalizeStepFromRaw(
+      step,
+      pieceDir,
+      sections,
+      pieceProvider,
+      pieceModel,
+      pieceProviderOptions,
+      context,
+      projectOverrides,
+      globalOverrides,
+      pieceArpeggioPolicy,
+      pieceMcpServersPolicy,
+    ),
   );
 
   // Schema guarantees movements.min(1)
@@ -467,7 +479,6 @@ export function normalizePieceConfig(
     initialMovement,
     maxMovements: parsed.max_movements,
     loopMonitors: normalizeLoopMonitors(parsed.loop_monitors, pieceDir, sections, context),
-    answerAgent: parsed.answer_agent,
     interactiveMode: parsed.interactive_mode,
     ...(parsed.subpiece != null && { subpiece: parsed.subpiece }),
   };
@@ -498,6 +509,157 @@ export function loadPieceFromFile(filePath: string, projectDir: string): PieceCo
   const globalConfig = loadGlobalConfig();
   const projectOverrides = projectConfig.pieceOverrides;
   const globalOverrides = globalConfig.pieceOverrides;
+  const pieceRuntimePreparePolicy = resolvePieceRuntimePreparePolicy(
+    globalConfig.pieceRuntimePrepare,
+    projectConfig.pieceRuntimePrepare,
+  );
+  const pieceArpeggioPolicy = resolvePieceArpeggioPolicy(globalConfig.pieceArpeggio, projectConfig.pieceArpeggio);
+  const pieceMcpServersPolicy = resolvePieceMcpServersPolicy(globalConfig.pieceMcpServers, projectConfig.pieceMcpServers);
 
-  return normalizePieceConfig(raw, pieceDir, context, projectOverrides, globalOverrides);
+  return normalizePieceConfig(
+    raw,
+    pieceDir,
+    context,
+    projectOverrides,
+    globalOverrides,
+    pieceRuntimePreparePolicy,
+    pieceArpeggioPolicy,
+    pieceMcpServersPolicy,
+  );
+}
+
+function resolvePieceRuntimePreparePolicy(
+  globalPolicy: PieceRuntimePrepareConfig | undefined,
+  projectPolicy: PieceRuntimePrepareConfig | undefined,
+): PieceRuntimePrepareConfig | undefined {
+  const policy: PieceRuntimePrepareConfig = {};
+
+  if (globalPolicy?.customScripts !== undefined) {
+    policy.customScripts = globalPolicy.customScripts;
+  }
+  if (projectPolicy?.customScripts !== undefined) {
+    policy.customScripts = projectPolicy.customScripts;
+  }
+
+  return Object.keys(policy).length > 0 ? policy : undefined;
+}
+
+function validatePieceRuntimePrepare(
+  runtime: PieceConfig['runtime'],
+  policy?: PieceRuntimePrepareConfig,
+): void {
+  const prepareEntries = runtime?.prepare ?? [];
+  if (prepareEntries.length === 0) return;
+
+  for (const entry of prepareEntries) {
+    if (isRuntimePreparePreset(entry)) continue;
+    if (policy?.customScripts === true) continue;
+    throw new Error(
+      `Piece runtime.prepare custom script "${entry}" is disabled by default. `
+      + 'Configure piece_runtime_prepare.custom_scripts in project/global config to allow it.'
+    );
+  }
+}
+
+function resolvePieceArpeggioPolicy(
+  globalPolicy: PieceArpeggioConfig | undefined,
+  projectPolicy: PieceArpeggioConfig | undefined,
+): PieceArpeggioConfig | undefined {
+  const policy: PieceArpeggioConfig = {};
+
+  if (globalPolicy?.customDataSourceModules !== undefined) {
+    policy.customDataSourceModules = globalPolicy.customDataSourceModules;
+  }
+  if (globalPolicy?.customMergeInlineJs !== undefined) {
+    policy.customMergeInlineJs = globalPolicy.customMergeInlineJs;
+  }
+  if (globalPolicy?.customMergeFiles !== undefined) {
+    policy.customMergeFiles = globalPolicy.customMergeFiles;
+  }
+
+  if (projectPolicy?.customDataSourceModules !== undefined) {
+    policy.customDataSourceModules = projectPolicy.customDataSourceModules;
+  }
+  if (projectPolicy?.customMergeInlineJs !== undefined) {
+    policy.customMergeInlineJs = projectPolicy.customMergeInlineJs;
+  }
+  if (projectPolicy?.customMergeFiles !== undefined) {
+    policy.customMergeFiles = projectPolicy.customMergeFiles;
+  }
+
+  return Object.keys(policy).length > 0 ? policy : undefined;
+}
+
+function validatePieceArpeggio(
+  movementName: string,
+  raw: RawStep['arpeggio'],
+  policy?: PieceArpeggioConfig,
+): void {
+  if (!raw) return;
+
+  if (raw.source !== 'csv' && policy?.customDataSourceModules !== true) {
+    throw new Error(
+      `Movement "${movementName}" uses Arpeggio source "${raw.source}", which is disabled by default for pieces. `
+      + 'Configure piece_arpeggio.custom_data_source_modules in project/global config to allow it.'
+    );
+  }
+
+  if (raw.merge?.inline_js && policy?.customMergeInlineJs !== true) {
+    throw new Error(
+      `Movement "${movementName}" uses Arpeggio inline_js, which is disabled by default for pieces. `
+      + 'Configure piece_arpeggio.custom_merge_inline_js in project/global config to allow it.'
+    );
+  }
+
+  if (raw.merge?.file && policy?.customMergeFiles !== true) {
+    throw new Error(
+      `Movement "${movementName}" uses Arpeggio merge.file, which is disabled by default for pieces. `
+      + 'Configure piece_arpeggio.custom_merge_files in project/global config to allow it.'
+    );
+  }
+}
+
+function resolvePieceMcpServersPolicy(
+  globalPolicy: PieceMcpServersConfig | undefined,
+  projectPolicy: PieceMcpServersConfig | undefined,
+): PieceMcpServersConfig | undefined {
+  const policy: PieceMcpServersConfig = {};
+
+  if (globalPolicy?.stdio !== undefined) policy.stdio = globalPolicy.stdio;
+  if (globalPolicy?.sse !== undefined) policy.sse = globalPolicy.sse;
+  if (globalPolicy?.http !== undefined) policy.http = globalPolicy.http;
+
+  if (projectPolicy?.stdio !== undefined) policy.stdio = projectPolicy.stdio;
+  if (projectPolicy?.sse !== undefined) policy.sse = projectPolicy.sse;
+  if (projectPolicy?.http !== undefined) policy.http = projectPolicy.http;
+
+  return Object.keys(policy).length > 0 ? policy : undefined;
+}
+
+function isPieceMcpTransportAllowed(
+  config: NonNullable<NonNullable<RawStep['mcp_servers']>[string]>,
+  policy: PieceMcpServersConfig | undefined,
+): boolean {
+  const transport = config.type ?? 'stdio';
+  if (transport === 'stdio') return policy?.stdio ?? false;
+  if (transport === 'sse') return policy?.sse ?? false;
+  return policy?.http ?? false;
+}
+
+function validatePieceMcpServers(
+  movementName: string,
+  mcpServers: RawStep['mcp_servers'],
+  policy: PieceMcpServersConfig | undefined,
+): void {
+  if (!mcpServers) return;
+
+  for (const [serverName, config] of Object.entries(mcpServers)) {
+    if (isPieceMcpTransportAllowed(config, policy)) continue;
+    const transport = config.type ?? 'stdio';
+    throw new Error(
+      `Movement "${movementName}" uses MCP server "${serverName}" with transport "${transport}", `
+      + 'which is disabled by default for pieces. '
+      + 'Configure piece_mcp_servers in project/global config to allow it.'
+    );
+  }
 }

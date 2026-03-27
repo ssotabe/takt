@@ -56,6 +56,7 @@ import { execFileSync } from 'node:child_process';
 import { error as logError, success } from '../shared/ui/index.js';
 import { pushBranch } from '../infra/task/index.js';
 import { getProvider } from '../infra/providers/index.js';
+import { resolveConfigValues } from '../infra/config/index.js';
 import { syncBranchWithRoot } from '../features/tasks/list/taskSyncAction.js';
 import type { TaskListItem } from '../infra/task/index.js';
 import type { AgentResponse } from '../core/models/index.js';
@@ -66,6 +67,7 @@ const mockLogError = vi.mocked(logError);
 const mockSuccess = vi.mocked(success);
 const mockPushBranch = vi.mocked(pushBranch);
 const mockGetProvider = vi.mocked(getProvider);
+const mockResolveConfigValues = vi.mocked(resolveConfigValues);
 
 function makeTask(overrides: Partial<TaskListItem> = {}): TaskListItem {
   return {
@@ -97,6 +99,7 @@ describe('syncBranchWithRoot', () => {
     vi.clearAllMocks();
     mockExistsSync.mockReturnValue(true);
     mockAgentCall.mockResolvedValue(makeAgentResponse());
+    mockResolveConfigValues.mockReturnValue({ provider: 'claude', model: 'sonnet' } as never);
   });
 
   it('throws when called with a non-task BranchActionTarget', async () => {
@@ -180,8 +183,72 @@ describe('syncBranchWithRoot', () => {
         cwd: task.worktreePath,
         model: 'sonnet',
         permissionMode: 'edit',
-        onPermissionRequest: expect.any(Function),
         onStream: expect.any(Function),
+      }),
+    );
+  });
+
+  it('does not pass auto-approve handler when sync_conflict_resolver is not configured', async () => {
+    const task = makeTask();
+    mockResolveConfigValues.mockReturnValue({
+      provider: 'claude',
+      model: 'sonnet',
+    } as never);
+    mockExecFileSync
+      .mockReturnValueOnce('' as never)
+      .mockImplementationOnce(() => { throw new Error('CONFLICT'); });
+
+    const result = await syncBranchWithRoot(PROJECT_DIR, task);
+
+    expect(result).toBe(true);
+    expect(mockAgentCall).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        onPermissionRequest: undefined,
+      }),
+    );
+  });
+
+  it('does not pass auto-approve handler when autoApproveTools is false', async () => {
+    const task = makeTask();
+    mockResolveConfigValues.mockReturnValue({
+      provider: 'claude',
+      model: 'sonnet',
+      syncConflictResolver: { autoApproveTools: false },
+    } as never);
+    mockExecFileSync
+      .mockReturnValueOnce('' as never)
+      .mockImplementationOnce(() => { throw new Error('CONFLICT'); });
+
+    const result = await syncBranchWithRoot(PROJECT_DIR, task);
+
+    expect(result).toBe(true);
+    expect(mockAgentCall).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        onPermissionRequest: undefined,
+      }),
+    );
+  });
+
+  it('passes auto-approve handler when sync_conflict_resolver config enables it', async () => {
+    const task = makeTask();
+    mockResolveConfigValues.mockReturnValue({
+      provider: 'claude',
+      model: 'sonnet',
+      syncConflictResolver: { autoApproveTools: true },
+    } as never);
+    mockExecFileSync
+      .mockReturnValueOnce('' as never)
+      .mockImplementationOnce(() => { throw new Error('CONFLICT'); });
+
+    const result = await syncBranchWithRoot(PROJECT_DIR, task);
+
+    expect(result).toBe(true);
+    expect(mockAgentCall).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        onPermissionRequest: expect.any(Function),
       }),
     );
   });

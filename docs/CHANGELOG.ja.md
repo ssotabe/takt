@@ -6,6 +6,101 @@
 
 フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) に基づいています。
 
+## [0.33.2] - 2026-03-26
+
+### Added
+
+- 読み取り専用の監査ピースを追加: `audit-architecture`, `audit-architecture-frontend`, `audit-architecture-backend`, `audit-architecture-dual`, `audit-e2e`, `audit-unit`。コードを変更せずにモジュール境界やカバレッジギャップを列挙し、Issue 作成可能なレポートを出力
+
+### Changed
+
+- `security-audit` ピースを `audit-security` にリネーム（監査ピース群の命名規則を統一）
+- ビルトインピースカテゴリを再構成: 🧪 Testing カテゴリを廃止し、監査ピースを 🔍 Review カテゴリに統合
+- `fill-unit`, `fill-e2e` ピースを削除（`audit-unit`, `audit-e2e` に置き換え）
+
+### Fixed
+
+- GitLab セルフホスト環境で worktree（共有クローン）実行時に MR 作成が失敗するバグを修正。Git プロバイダーの `cwd` がクローンパスに正しく伝播するよう変更 (#552)
+
+### Internal
+
+- Git プロバイダーの `cwd` 伝播に関するテストカバレッジを追加
+- 設定ドキュメントから `verbose` オプションの記載を削除し、`logging.level` による設定方法に統一 (#543)
+
+## [0.33.1] - 2026-03-24
+
+### Changed
+
+- ファイナルレビューとセキュリティレビューのガードレールを強化: supervisor のファセット、セキュリティナレッジ、レビューポリシー・インストラクションを拡充
+
+### Fixed
+
+- GitLab セルフホスト環境で `gitlab.com` の認証がない場合にタスク完了後の MR 作成が必ず失敗するバグを修正。`glab auth status` がリモートのホスト名を指定して認証チェックするよう変更 (#545)
+
+### Internal
+
+- GitLab プロバイダーのテストカバレッジを拡充（セルフホスト環境の認証チェック、ホスト名ベースの CLI ステータス検証）
+
+## [0.33.0] - 2026-03-22
+
+### Added
+
+- GitLab VCS プロバイダーを追加: `glab` CLI を使った Issue 取得・マージリクエスト作成・レビューコメント取得に対応。git リモート URL からの自動検出をサポートし、`vcs_provider: gitlab` による明示的な設定も可能 (#512)
+- インタラクティブモード用プロバイダー設定 (`taktProviders.assistant`) を追加: ピース実行とは独立したプロバイダー/モデルをインタラクティブモードに指定可能 (#483)
+
+### Changed
+
+- BREAKING: ピース YAML の MCP サーバー設定をデフォルト拒否に変更。使用するには `pieceMcpServers` でトランスポート別に明示的に許可が必要 (#524)
+- BREAKING: ピース YAML の Arpeggio カスタムコード（カスタムデータソース、インライン JS、外部マージファイル）をデフォルト拒否に変更。使用するには `pieceArpeggio` で明示的に許可が必要 (#521)
+- BREAKING: ピース YAML の runtime prepare カスタムスクリプトをデフォルト拒否に変更（ビルトインプリセットは常に許可）。使用するには `pieceRuntimePrepare.customScripts: true` が必要 (#520)
+- BREAKING: sync conflict resolver の自動ツール承認をデフォルト拒否に変更。使用するには `syncConflictResolver.autoApproveTools: true` が必要 (#522)
+- team leader のタスク分解における最大ターン数を 4 → 5 に引き上げ (#511)
+- supervisor ファセットを強化: 要件カバレッジのエビデンスベース検証を追加
+- ペルソナファセットからクロスエージェント参照を除去し、ピース横断での再利用性を向上
+
+### Fixed
+
+- パイプラインモードで auto-commit の push 失敗時に PR 作成が無診断で失敗する問題を修正 (#532)
+- `.takt/.gitignore` のファセットパスが実際のディレクトリ構造と不一致だった問題を修正 (#535)
+- レビューピースの gather モードでブランチ検出が不正確だった問題を修正（完全一致を要求するよう変更） (#523)
+- レビューピースで reject findings のフォーマットが正しく処理されない問題を修正 (#528)
+- パイプラインモードでタスクブランチが PR 作成前に push されず、PR 作成が失敗する問題を修正
+
+### Internal
+
+- GitLab プロバイダーのテストカバレッジを追加（issue, pr, provider, utils）
+- VCS プロバイダーの自動検出・ファクトリ・フォーマットのテストカバレッジを追加
+- MCP サーバー・Arpeggio・runtime prepare・conflict resolver のデフォルト拒否に関するテストカバレッジを追加
+- ピースローダーのテストカバレッジを大幅に拡充
+- プロジェクト設定・グローバル設定のテストカバレッジを追加
+- MCP サーバーヘルパー、ポリシー正規化、conflict resolver ヘルパーのリファクタリング
+- ドキュメント更新（レビューピース名の修正、ビルトインカタログ更新）
+- ビルド/lint/テスト品質ゲートの追加と E2E テスト環境の CLAUDECODE 環境変数分離
+- テスト契約チェックのビルトインファセット強化（review-test, write-tests-first, testing-review）
+- タスク auto-PR の E2E テストを追加
+
+## [0.32.2] - 2026-03-17
+
+### Added
+
+- 到達経路（Reachability）ファセットを追加: 新しい画面・機能を追加する際に、ルーティング・メニュー・ボタン等のエントリーポイントを同時に整備することを計画・実装・レビューの各段階で検証
+- 再取得ループ防止ファセットを追加: `useEffect` の依存配列に不安定な Context/Provider 関数参照を含めることで起きる無限ループを検出・防止するナレッジとポリシー
+- UIライブラリ統合ファセットを追加: サードパーティ UI コンポーネント（データグリッド、日付ピッカー等）導入時のバージョン互換性・実マウント検証のナレッジとポリシー
+- React ナレッジファセット (`react.md`) を新規追加: Effects の再実行制御、Context/Provider の値安定性に関する判断基準テーブル付き
+- デザイン計画ポリシー (`design-planning.md`) を新規追加: デザインリファレンスが存在する場合の要素インベントリ・スコープ決定の基準
+- フロントエンド専用プランフォーマット (`plan-frontend.md`) を新規追加: デザイン要素の Keep/Change 判定テーブルを含むプラン出力契約
+
+### Changed
+
+- フロントエンド系ピース（`frontend`, `frontend-mini`, `dual`, `dual-mini`, `dual-cqrs`, `dual-cqrs-mini`）の plan ムーブメントに `design-planning` ポリシーと `react` ナレッジを統合
+- フロントエンド系ピースのプランフォーマットを `plan` から `plan-frontend` に変更
+- `frontend` ピースの全ムーブメント（テスト、レビュー、修正等）に `react` ナレッジを追加
+
+### Internal
+
+- `@openai/codex-sdk` を 0.112.0 → 0.114.0 に更新
+- team leader worker pool の E2E テストを安定化
+
 ## [0.32.1] - 2026-03-14
 
 ### Fixed
@@ -23,9 +118,9 @@
 
 ### Internal
 
-- テスト系ピース・ファセットの全面整備（e2e-test → fill-e2e、unit-test → fill-unit にリネーム、ナレッジ・ポリシー追加）
+- テスト系ピース・ファセットの全面整備（e2e-test → audit-e2e、unit-test → audit-unit にリネーム、ナレッジ・ポリシー追加）
 - デザイン忠実度ポリシーの追加とフロントエンド系ピースへの統合
-- security-audit ピースの追加
+- audit-security ピースの追加
 - ファセットデプロイメントのリファクタリング（templates ディレクトリの廃止、facets ディレクトリへの統合） (#505)
 - `isPathInside` ユーティリティを追加し、クローン削除・worktree 再利用のパス検証を強化
 - ループモニターの閾値調整とレビューポリシーの改善

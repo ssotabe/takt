@@ -66,6 +66,37 @@ Test names describe expected behavior. Use the `should {expected behavior} when 
 - Arrange-Act-Assert pattern (equivalent to Given-When-Then)
 - Avoid magic numbers and magic strings
 
+## Refetch loop regressions
+
+When a page performs initial loading, tests must prove that the load does not rerun because of unrelated re-renders, loading toggles, or Context callback identity changes.
+
+| Criteria | Verdict |
+|----------|---------|
+| Initial load bug fix has no regression test for duplicate API calls | REJECT |
+| Tests only verify that loading happened once, not that it stayed stable after rerender | Warning |
+| Page tests assert call count stability across rerender or state updates | OK |
+
+## Reachability regressions
+
+When adding or changing user-facing features or screens, tests or equivalent verification must prove that users can still reach the feature.
+
+| Criteria | Verdict |
+|----------|---------|
+| A new screen or feature is added with no verification of entry path or launch conditions | REJECT |
+| Only isolated component rendering is tested, without verifying reachability from an entry point | Warning |
+| The feature is verified reachable from an actual entry point such as a route, menu, button, link, or external caller | OK |
+
+## UI library integration regressions
+
+When introducing or changing major third-party UI components such as data grids, date pickers, virtualized lists, or charts, tests must prove that the real component mounts without crashing.
+
+| Criteria | Verdict |
+|----------|---------|
+| A major third-party UI component is added or changed without a regression test that mounts the real component | REJECT |
+| Prop compatibility is checked only through shallow mocks or existence checks | Warning |
+| The screen is rendered from its real entry path and the primary UI mounts without exceptions | OK |
+| The primary UI component is also rendered directly with representative props | OK |
+
 ## Test Strategy
 
 - Prefer unit tests for logic, integration tests for boundaries

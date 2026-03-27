@@ -70,7 +70,7 @@ export async function syncBranchWithRoot(
   const systemPrompt = loadTemplate('sync_conflict_resolver_system_prompt', lang);
   const prompt = loadTemplate('sync_conflict_resolver_message', lang, { originalInstruction });
 
-  const config = resolveConfigValues(projectDir, ['provider', 'model']);
+  const config = resolveConfigValues(projectDir, ['provider', 'model', 'syncConflictResolver']);
   if (!config.provider) {
     throw new Error('No provider configured. Set "provider" in ~/.takt/config.yaml');
   }
@@ -78,11 +78,12 @@ export async function syncBranchWithRoot(
   const provider = getProvider(providerType);
   const agent = provider.setup({ name: 'conflict-resolver', systemPrompt });
 
+  const onPermissionRequest = config.syncConflictResolver?.autoApproveTools ? autoApproveBash : undefined;
   const response = await agent.call(prompt, {
     cwd: worktreePath,
     model: config.model,
     permissionMode: 'edit',
-    onPermissionRequest: autoApproveBash,
+    onPermissionRequest,
     onStream: new StreamDisplay('conflict-resolver', false).createHandler(),
   });
 

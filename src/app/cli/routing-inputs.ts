@@ -1,29 +1,32 @@
 import { withProgress } from '../../shared/ui/index.js';
-import { formatIssueAsTask, parseIssueNumbers, formatPrReviewAsTask } from '../../infra/github/index.js';
-import { getGitProvider } from '../../infra/git/index.js';
+import { formatIssueAsTask, parseIssueNumbers, formatPrReviewAsTask, getGitProvider } from '../../infra/git/index.js';
 import type { PrReviewData } from '../../infra/git/index.js';
 import { isDirectTask } from './helpers.js';
+
 export async function resolveIssueInput(
   issueOption: number | undefined,
   task: string | undefined,
+  cwd?: string,
 ): Promise<{ initialInput: string } | null> {
   if (issueOption) {
-    const ghStatus = getGitProvider().checkCliStatus();
-    if (!ghStatus.available) {
-      throw new Error(ghStatus.error);
+    const provider = getGitProvider();
+    const cliStatus = provider.checkCliStatus(cwd);
+    if (!cliStatus.available) {
+      throw new Error(cliStatus.error);
     }
     const issue = await withProgress(
-      'Fetching GitHub Issue...',
-      (fetchedIssue) => `GitHub Issue fetched: #${fetchedIssue.number} ${fetchedIssue.title}`,
-      async () => getGitProvider().fetchIssue(issueOption),
+      'Fetching issue...',
+      (fetchedIssue) => `Issue fetched: #${fetchedIssue.number} ${fetchedIssue.title}`,
+      async () => provider.fetchIssue(issueOption, cwd),
     );
     return { initialInput: formatIssueAsTask(issue) };
   }
 
   if (task && isDirectTask(task)) {
-    const ghStatus = getGitProvider().checkCliStatus();
-    if (!ghStatus.available) {
-      throw new Error(ghStatus.error);
+    const provider = getGitProvider();
+    const cliStatus = provider.checkCliStatus(cwd);
+    if (!cliStatus.available) {
+      throw new Error(cliStatus.error);
     }
     const tokens = task.trim().split(/\s+/);
     const issueNumbers = parseIssueNumbers(tokens);
@@ -31,9 +34,9 @@ export async function resolveIssueInput(
       throw new Error(`Invalid issue reference: ${task}`);
     }
     const issues = await withProgress(
-      'Fetching GitHub Issue...',
-      (fetchedIssues) => `GitHub Issues fetched: ${fetchedIssues.map((issue) => `#${issue.number}`).join(', ')}`,
-      async () => issueNumbers.map((n) => getGitProvider().fetchIssue(n)),
+      'Fetching issues...',
+      (fetchedIssues) => `Issues fetched: ${fetchedIssues.map((issue) => `#${issue.number}`).join(', ')}`,
+      async () => issueNumbers.map((n) => provider.fetchIssue(n, cwd)),
     );
     return { initialInput: issues.map(formatIssueAsTask).join('\n\n---\n\n') };
   }
@@ -43,16 +46,18 @@ export async function resolveIssueInput(
 
 export async function resolvePrInput(
   prNumber: number,
+  cwd?: string,
 ): Promise<{ initialInput: string; prBranch: string; baseBranch?: string }> {
-  const ghStatus = getGitProvider().checkCliStatus();
-  if (!ghStatus.available) {
-    throw new Error(ghStatus.error);
+  const provider = getGitProvider();
+  const cliStatus = provider.checkCliStatus(cwd);
+  if (!cliStatus.available) {
+    throw new Error(cliStatus.error);
   }
 
   const prReview = await withProgress(
     'Fetching PR review comments...',
     (pr: PrReviewData) => `PR fetched: #${pr.number} ${pr.title}`,
-    async () => getGitProvider().fetchPrReviewComments(prNumber),
+    async () => provider.fetchPrReviewComments(prNumber, cwd),
   );
 
   return {

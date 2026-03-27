@@ -11,7 +11,6 @@
 ```yaml
 # ~/.takt/config.yaml
 language: en                  # UI 言語: 'en' または 'ja'
-default_piece: default        # 新規プロジェクトのデフォルト piece
 logging:
   level: info                 # ログレベル: debug, info, warn, error
 provider: claude              # デフォルト provider: claude, codex, opencode, cursor, または copilot
@@ -72,6 +71,33 @@ interactive_preview_movements: 3  # インタラクティブモードでの move
 # cursor_cli_path: /usr/local/bin/cursor-agent
 # copilot_cli_path: /usr/local/bin/github-copilot-cli
 
+# VCS プロバイダー（省略可）
+# git リモート URL から自動検出（github.com → github、gitlab.com → gitlab）
+# セルフホスト環境では明示的に設定
+# vcs_provider: github                   # 'github' または 'gitlab'
+
+# インタラクティブモード用 assistant プロバイダー（省略可）
+# インタラクティブモードの会話を別の provider/model にルーティング
+# taktProviders:
+#   assistant:
+#     provider: claude
+#     model: opus
+
+# ピースセキュリティポリシー（すべてデフォルト拒否）
+# 信頼されていないピース YAML が実行できる内容を制御
+# pieceMcpServers:                       # MCP サーバートランスポートポリシー
+#   stdio: true                          # stdio トランスポートを許可（デフォルト: false）
+#   sse: false                           # SSE トランスポートを許可（デフォルト: false）
+#   http: false                          # HTTP トランスポートを許可（デフォルト: false）
+# pieceArpeggio:                         # Arpeggio カスタムコードポリシー
+#   customDataSourceModules: false       # カスタムデータソースモジュールを許可（デフォルト: false）
+#   customMergeInlineJs: false           # インライン JS マージ関数を許可（デフォルト: false）
+#   customMergeFiles: false              # 外部マージファイルを許可（デフォルト: false）
+# pieceRuntimePrepare:                   # ランタイム prepare ポリシー
+#   customScripts: false                 # カスタムスクリプトを許可（デフォルト: false、ビルトインプリセットは常に許可）
+# syncConflictResolver:                  # sync conflict resolver ポリシー
+#   autoApproveTools: false              # ツールの自動承認を許可（デフォルト: false）
+
 # ビルトイン piece フィルタリング（省略可）
 # builtin_pieces_enabled: true           # false ですべてのビルトインを無効化
 # disabled_builtins: [magi]              # 特定のビルトイン piece を無効化
@@ -92,7 +118,6 @@ interactive_preview_movements: 3  # インタラクティブモードでの move
 | フィールド | 型 | デフォルト | 説明 |
 |-----------|------|---------|------|
 | `language` | `"en"` \| `"ja"` | `"en"` | UI 言語 |
-| `default_piece` | string | `"default"` | 新規プロジェクトのデフォルト piece |
 | `logging.level` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` | `"info"` | ログレベル |
 | `provider` | `"claude"` \| `"codex"` \| `"opencode"` \| `"cursor"` \| `"copilot"` | `"claude"` | デフォルト AI provider |
 | `model` | string | - | デフォルトモデル名（provider にそのまま渡される） |
@@ -107,7 +132,6 @@ interactive_preview_movements: 3  # インタラクティブモードでの move
 | `allow_git_hooks` | boolean | `false` | TAKT 管理の auto-commit 時に git hooks を許可 |
 | `allow_git_filters` | boolean | `false` | TAKT 管理の auto-commit 時に git filter を許可 |
 | `auto_pr` | boolean | - | worktree 実行後に PR を自動作成 |
-| `verbose` | boolean | - | 詳細出力モード |
 | `minimal_output` | boolean | `false` | AI 出力を抑制（CI 向け） |
 | `runtime` | object | - | ランタイム環境デフォルト（例: `prepare: [gradle, node]`） |
 | `persona_providers` | object | - | persona ごとの provider / model 上書き（例: `coder: { provider: codex, model: o3-mini }`） |
@@ -128,6 +152,12 @@ interactive_preview_movements: 3  # インタラクティブモードでの move
 | `auto_fetch` | boolean | `false` | クローン作成前にリモートを fetch してクローンを最新に保つ |
 | `base_branch` | string | - | クローン作成のベースブランチ（デフォルトはリモートのデフォルトブランチ） |
 | `piece_categories_file` | string | - | piece カテゴリファイルのパス |
+| `vcs_provider` | `"github"` \| `"gitlab"` | 自動検出 | VCS プロバイダー（git リモート URL から自動検出） |
+| `taktProviders` | object | - | TAKT 内部プロバイダー上書き（例: `assistant: { provider: claude, model: opus }`） |
+| `pieceMcpServers` | object | すべて `false` | MCP サーバートランスポートポリシー（`stdio`, `sse`, `http` トグル） |
+| `pieceArpeggio` | object | すべて `false` | Arpeggio カスタムコードポリシー（`customDataSourceModules`, `customMergeInlineJs`, `customMergeFiles`） |
+| `pieceRuntimePrepare` | object | `{ customScripts: false }` | ランタイム prepare ポリシー（ビルトインプリセットは常に許可） |
+| `syncConflictResolver` | object | `{ autoApproveTools: false }` | sync conflict resolver ポリシー |
 
 ## プロジェクト設定
 
@@ -139,7 +169,8 @@ piece: default                # このプロジェクトの現在の piece
 provider: claude              # このプロジェクトの provider 上書き
 model: sonnet                 # このプロジェクトのモデル上書き
 auto_pr: true                 # worktree 実行後に PR を自動作成
-verbose: false                # 詳細出力モード
+logging:
+  level: info                 # コンソールログレベル: debug | info | warn | error
 concurrency: 2                # このプロジェクトでの takt run 並列タスク数（1-10）
 # base_branch: main           # クローン作成のベースブランチ（グローバルを上書き、デフォルト: リモートのデフォルトブランチ）
 
@@ -166,11 +197,16 @@ concurrency: 2                # このプロジェクトでの takt run 並列�
 | `allow_git_hooks` | boolean | `false` | TAKT 管理の auto-commit 時に git hooks を許可 |
 | `allow_git_filters` | boolean | `false` | TAKT 管理の auto-commit 時に git filter を許可 |
 | `auto_pr` | boolean | - | worktree 実行後に PR を自動作成 |
-| `verbose` | boolean | - | 詳細出力モード |
 | `concurrency` | number (1-10) | `1`（global 設定由来） | `takt run` の並列タスク数 |
 | `base_branch` | string | - | クローン作成のベースブランチ（グローバルを上書き、デフォルト: リモートのデフォルトブランチ） |
 | `provider_options` | object | - | provider 固有オプション |
 | `provider_profiles` | object | - | provider 固有のパーミッションプロファイル |
+| `vcs_provider` | `"github"` \| `"gitlab"` | 自動検出 | VCS プロバイダー（グローバルを上書き） |
+| `taktProviders` | object | - | TAKT 内部プロバイダー上書き（例: `assistant: { provider: claude, model: opus }`） |
+| `pieceMcpServers` | object | - | MCP サーバートランスポートポリシー（グローバルを上書き） |
+| `pieceArpeggio` | object | - | Arpeggio カスタムコードポリシー（グローバルを上書き） |
+| `pieceRuntimePrepare` | object | - | ランタイム prepare ポリシー（グローバルを上書き） |
+| `syncConflictResolver` | object | - | sync conflict resolver ポリシー（グローバルを上書き） |
 
 プロジェクト設定の値は、両方が設定されている場合にグローバル設定を上書きします。
 
@@ -448,18 +484,21 @@ logging:
 
 デバッグログは `.takt/runs/debug-{timestamp}/logs/debug.log` に NDJSON 形式で出力されます。
 
-### 詳細モード
+### 詳細コンソール出力
 
-`verbose: true` を設定すると、詳細なコンソール出力が有効になります。これにより、デバッグログ・トレースも有効化され、ログレベルが `debug` になります。
-
-または、環境変数で `TAKT_VERBOSE=true` を指定して有効化できます。
+`logging.level: debug` を設定すると、詳細なコンソール出力が有効になります。
 
 ```yaml
 # ~/.takt/config.yaml または .takt/config.yaml
-verbose: true
+logging:
+  level: debug
 ```
 
-```bash
-# env
-TAKT_VERBOSE=true
+これは CLI 内部の verbose console mode を有効にする設定です。
+
+`debug.log` などのデバッグ成果物が必要な場合は、別途 `logging.debug: true` を設定してください。
+
+```yaml
+logging:
+  debug: true
 ```

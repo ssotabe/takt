@@ -7,7 +7,8 @@
 import { execFileSync } from 'node:child_process';
 import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
 import { checkGhCli } from './issue.js';
-import type { Issue, CreatePrOptions, CreatePrResult, ExistingPr, CommentResult, PrReviewData, PrReviewComment } from '../git/types.js';
+import { MAX_PAGES } from '../git/constants.js';
+import type { CreatePrOptions, CreatePrResult, ExistingPr, CommentResult, PrReviewData, PrReviewComment } from '../git/types.js';
 
 const log = createLogger('github-pr');
 
@@ -15,8 +16,8 @@ const log = createLogger('github-pr');
  * Find an open PR for the given branch.
  * Returns undefined if no PR exists.
  */
-export function findExistingPr(cwd: string, branch: string): ExistingPr | undefined {
-  const ghStatus = checkGhCli();
+export function findExistingPr(branch: string, cwd: string): ExistingPr | undefined {
+  const ghStatus = checkGhCli(cwd);
   if (!ghStatus.available) return undefined;
 
   try {
@@ -32,10 +33,10 @@ export function findExistingPr(cwd: string, branch: string): ExistingPr | undefi
   }
 }
 
-export function commentOnPr(cwd: string, prNumber: number, body: string): CommentResult {
-  const ghStatus = checkGhCli();
+export function commentOnPr(prNumber: number, body: string, cwd: string): CommentResult {
+  const ghStatus = checkGhCli(cwd);
   if (!ghStatus.available) {
-    return { success: false, error: ghStatus.error ?? 'gh CLI is not available' };
+    return { success: false, error: ghStatus.error };
   }
 
   try {
@@ -71,7 +72,19 @@ interface GhPrViewReviewResponse {
   files: Array<{ path: string }>;
 }
 
-interface GhPrApiReviewCommentResponse {
+/** Raw shape from GitHub Pull Request Review Comments API (null fields normalized on parse) */
+interface GhPrApiReviewComment {
+  body: string;
+  path: string;
+  line?: number;
+  original_line?: number;
+  user: { login: string };
+}
+
+const INLINE_REVIEW_COMMENTS_PER_PAGE = 100;
+
+/** Raw JSON shape from GitHub API (line/original_line are nullable) */
+interface GhPrApiRawReviewComment {
   body: string;
   path: string;
   line: number | null;
@@ -79,28 +92,39 @@ interface GhPrApiReviewCommentResponse {
   user: { login: string };
 }
 
-const INLINE_REVIEW_COMMENTS_PER_PAGE = 100;
+function normalizeReviewComment(raw: GhPrApiRawReviewComment): GhPrApiReviewComment {
+  return {
+    body: raw.body,
+    path: raw.path,
+    line: raw.line ?? undefined,
+    original_line: raw.original_line ?? undefined,
+    user: raw.user,
+  };
+}
 
-function fetchInlineReviewComments(owner: string, repo: string, prNumber: number): GhPrApiReviewCommentResponse[] {
-  const comments: GhPrApiReviewCommentResponse[] = [];
+function fetchInlineReviewComments(owner: string, repo: string, prNumber: number, cwd: string): GhPrApiReviewComment[] {
+  const comments: GhPrApiReviewComment[] = [];
   let page = 1;
 
-  while (true) {
+  while (page <= MAX_PAGES) {
     const rawInlineReviewComments = execFileSync(
       'gh',
       ['api', `/repos/${owner}/${repo}/pulls/${prNumber}/comments?per_page=${INLINE_REVIEW_COMMENTS_PER_PAGE}&page=${page}`],
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+      { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
-    const inlineReviewComments = JSON.parse(rawInlineReviewComments) as GhPrApiReviewCommentResponse[];
+    const parsed = JSON.parse(rawInlineReviewComments) as GhPrApiRawReviewComment[];
+    const normalized = parsed.map(normalizeReviewComment);
 
-    comments.push(...inlineReviewComments);
+    comments.push(...normalized);
 
-    if (inlineReviewComments.length < INLINE_REVIEW_COMMENTS_PER_PAGE) {
-      return comments;
+    if (parsed.length < INLINE_REVIEW_COMMENTS_PER_PAGE) {
+      break;
     }
 
     page += 1;
   }
+
+  return comments;
 }
 
 function parseRepositoryFromPrUrl(prUrl: string): { owner: string; repo: string } {
@@ -123,19 +147,19 @@ function parseRepositoryFromPrUrl(prUrl: string): { owner: string; repo: string 
  * Fetch PR review comments and metadata via `gh pr view`.
  * Throws on failure (PR not found, network error, etc.).
  */
-export function fetchPrReviewComments(prNumber: number): PrReviewData {
+export function fetchPrReviewComments(prNumber: number, cwd: string): PrReviewData {
   log.debug('Fetching PR review comments', { prNumber });
 
   const raw = execFileSync(
     'gh',
     ['pr', 'view', String(prNumber), '--json', PR_REVIEW_JSON_FIELDS],
-    { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
   );
 
   const data = JSON.parse(raw) as GhPrViewReviewResponse;
   const { owner, repo } = parseRepositoryFromPrUrl(data.url);
 
-  const inlineReviewComments = fetchInlineReviewComments(owner, repo, prNumber);
+  const inlineReviewComments = fetchInlineReviewComments(owner, repo, prNumber, cwd);
 
   const comments: PrReviewComment[] = data.comments.map((c) => ({
     author: c.author.login,
@@ -153,7 +177,7 @@ export function fetchPrReviewComments(prNumber: number): PrReviewData {
       author: comment.user.login,
       body: comment.body,
       path: comment.path,
-      line: comment.line ?? comment.original_line ?? undefined,
+      line: comment.line ?? comment.original_line,
     });
   }
 
@@ -170,54 +194,10 @@ export function fetchPrReviewComments(prNumber: number): PrReviewData {
   };
 }
 
-/**
- * Format PR review data into task text for piece execution.
- */
-export function formatPrReviewAsTask(prReview: PrReviewData): string {
-  const parts: string[] = [];
-
-  parts.push(`## PR #${prReview.number} Review Comments: ${prReview.title}`);
-
-  if (prReview.body) {
-    parts.push('');
-    parts.push('### PR Description');
-    parts.push(prReview.body);
-  }
-
-  if (prReview.reviews.length > 0) {
-    parts.push('');
-    parts.push('### Review Comments');
-    for (const review of prReview.reviews) {
-      const location = review.path
-        ? `\n  File: ${review.path}${review.line ? `, Line: ${review.line}` : ''}`
-        : '';
-      parts.push(`**${review.author}**: ${review.body}${location}`);
-    }
-  }
-
-  if (prReview.comments.length > 0) {
-    parts.push('');
-    parts.push('### Conversation Comments');
-    for (const comment of prReview.comments) {
-      parts.push(`**${comment.author}**: ${comment.body}`);
-    }
-  }
-
-  if (prReview.files.length > 0) {
-    parts.push('');
-    parts.push('### Changed Files');
-    for (const file of prReview.files) {
-      parts.push(`- ${file}`);
-    }
-  }
-
-  return parts.join('\n');
-}
-
-export function createPullRequest(cwd: string, options: CreatePrOptions): CreatePrResult {
-  const ghStatus = checkGhCli();
+export function createPullRequest(options: CreatePrOptions, cwd: string): CreatePrResult {
+  const ghStatus = checkGhCli(cwd);
   if (!ghStatus.available) {
-    return { success: false, error: ghStatus.error ?? 'gh CLI is not available' };
+    return { success: false, error: ghStatus.error };
   }
 
   const args = [
@@ -257,30 +237,4 @@ export function createPullRequest(cwd: string, options: CreatePrOptions): Create
     log.error('PR creation failed', { error: errorMessage });
     return { success: false, error: errorMessage };
   }
-}
-
-/**
- * Build PR body from issues and execution report.
- * Supports multiple issues (adds "Closes #N" for each).
- */
-export function buildPrBody(issues: Issue[] | undefined, report: string): string {
-  const parts: string[] = [];
-
-  parts.push('## Summary');
-  if (issues && issues.length > 0) {
-    parts.push('');
-    parts.push(issues[0]!.body || issues[0]!.title);
-  }
-
-  parts.push('');
-  parts.push('## Execution Report');
-  parts.push('');
-  parts.push(report);
-
-  if (issues && issues.length > 0) {
-    parts.push('');
-    parts.push(issues.map((issue) => `Closes #${issue.number}`).join('\n'));
-  }
-
-  return parts.join('\n');
 }

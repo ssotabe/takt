@@ -1,7 +1,6 @@
-export interface CliStatus {
-  available: boolean;
-  error?: string;
-}
+export type CliStatus =
+  | { available: true }
+  | { available: false; error: string };
 
 export interface Issue {
   number: number;
@@ -68,17 +67,17 @@ export interface PrReviewData {
 }
 
 export interface GitProvider {
-  checkCliStatus(): CliStatus;
+  checkCliStatus(cwd?: string): CliStatus;
 
-  fetchIssue(issueNumber: number): Issue;
+  fetchIssue(issueNumber: number, cwd?: string): Issue;
 
-  createIssue(options: CreateIssueOptions): CreateIssueResult;
+  createIssue(options: CreateIssueOptions, cwd?: string): CreateIssueResult;
 
-  fetchPrReviewComments(prNumber: number): PrReviewData;
+  fetchPrReviewComments(prNumber: number, cwd?: string): PrReviewData;
 
-  findExistingPr(cwd: string, branch: string): ExistingPr | undefined;
+  findExistingPr(branch: string, cwd?: string): ExistingPr | undefined;
 
-  createPullRequest(cwd: string, options: CreatePrOptions): CreatePrResult;
+  createPullRequest(options: CreatePrOptions, cwd?: string): CreatePrResult;
 
-  commentOnPr(cwd: string, prNumber: number, body: string): CommentResult;
+  commentOnPr(prNumber: number, body: string, cwd?: string): CommentResult;
 }

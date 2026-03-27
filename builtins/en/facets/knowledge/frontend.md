@@ -45,6 +45,40 @@ features/{feature-name}/
 └── index.ts
 ```
 
+## Routing Wiring When Adding a Page
+
+Do not stop at creating the page component. A new page must also be wired into an actual entry path. Decide together with the implementation how the page is reached: router, menu, temporary route, or another explicit entry point.
+
+| Criteria | Judgment |
+|----------|----------|
+| A new page exists but no route is registered for it | REJECT |
+| Basename-based URL and route path mapping is not verified | REJECT |
+| Router wiring and page entry are decided together with the page implementation | OK |
+| A temporary development route is used and its purpose/removal plan is recorded | OK |
+| Routes are updated but actual entry points such as menus, buttons, links, or external callers are not checked | Warning |
+
+```tsx
+// OK - page and route are added together
+<Route path="/contreg" element={<ContainerRegisterPage />} />
+
+// REJECT - page exists but has no reachable route
+// src/pages/ContainerRegisterPage.tsx exists
+// Router has no matching route
+```
+
+Reachability is broader than router configuration. Confirm the real entry path users will follow, such as menus, transition buttons, dialog actions, links from other screens, or external callers.
+
+### Integrating third-party UI libraries
+
+Third-party UI libraries such as data grids, date pickers, charts, and virtualized lists can fail at runtime even when types pass. This is especially common across major-version changes where prop names or state model shapes are no longer compatible, and shallow mocks do not expose the problem.
+
+| Criteria | Judgment |
+|----------|----------|
+| Major UI library props are guessed without checking the version used by the project | REJECT |
+| Tests fully mock the library and miss real mount failures | Warning |
+| The real component is rendered with representative props and verified not to crash at screen level | OK |
+| Prop shapes are chosen by referencing existing in-project usage patterns and the installed version | OK |
+
 ## State Management
 
 Child components do not modify their own state. They bubble events to parent, and parent manipulates state.
@@ -78,6 +112,7 @@ Exception (OK for child to have local state):
 | State changes from child to parent (reverse data flow) | REJECT |
 | API response stored as-is in state | Consider normalization |
 | Inappropriate useEffect dependencies | REJECT |
+| Initial load tied to unstable Context/Provider function references | REJECT |
 
 State Placement Guidelines:
 
@@ -87,6 +122,17 @@ State Placement Guidelines:
 | Form input values | Local or form library |
 | Shared across multiple components | Context or state management library |
 | Server data cache | Data fetching library (TanStack Query, etc.) |
+
+## Initial load and refetch boundaries
+
+Initial loading should be separated from reactive refetching. If refetching is not driven by URL, filter, paging, or explicit user action, keep it mount-only and do not tie it to unstable callback references.
+
+| Criteria | Judgment |
+|----------|----------|
+| Initial load reruns because a Provider/Context callback changed identity | REJECT |
+| Refetch conditions are explicit (URL, filter, paging, refresh action) | OK |
+| Message display, loading toggles, or modal state cause refetching | REJECT |
+| Initial load is mount-only and later refetches are triggered explicitly | OK |
 
 ## Data Fetching
 

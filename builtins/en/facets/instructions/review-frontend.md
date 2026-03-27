@@ -7,6 +7,7 @@ Review the changes from a frontend development perspective.
 - Performance (re-renders, memoization)
 - Accessibility (keyboard navigation, ARIA)
 - Data fetching patterns
+- Reachability wiring for user-facing features (routes, entry paths, launch conditions)
 - TypeScript type safety
 
 **Design fidelity check (when a design reference exists):**
@@ -28,5 +29,6 @@ Review {report:coder-decisions.md} to understand the recorded design decisions.
 
 1. Review the change diff and detect issues based on the frontend development criteria above
    - Cross-check changes against REJECT criteria tables defined in knowledge
+   - When new screens or user-facing features are added, verify that entry points and caller wiring were updated as well
 2. For each detected issue, classify as blocking/non-blocking based on Policy's scope determination table and judgment rules
 3. If there is even one blocking issue, judge as REJECT

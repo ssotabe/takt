@@ -91,6 +91,29 @@ describe('loadGlobalConfig', () => {
     expect(config.interactivePreviewMovements).toBe(2);
   });
 
+  it('should load takt_providers.assistant from global config.yaml', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider: codex',
+        'model: gpt-5.4',
+        'takt_providers:',
+        '  assistant:',
+        '    provider: claude',
+        '    model: haiku',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const config = loadGlobalConfig();
+    expect(config.taktProviders).toEqual({
+      assistant: { provider: 'claude', model: 'haiku' },
+    });
+  });
+
   it('should persist project-local keys when saving global config', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
@@ -118,6 +141,90 @@ describe('loadGlobalConfig', () => {
     expect(raw).toContain('interactive_preview_movements:');
     expect(raw).toContain('allow_git_hooks: true');
     expect(raw).toContain('allow_git_filters: true');
+  });
+
+  it('should persist takt_providers.assistant when saving global config', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+    const config = loadGlobalConfig();
+    config.provider = 'codex';
+    config.model = 'gpt-5.4';
+    config.taktProviders = {
+      assistant: { provider: 'claude', model: 'haiku' },
+    };
+    saveGlobalConfig(config);
+    invalidateGlobalConfigCache();
+
+    const reloaded = loadGlobalConfig();
+    expect(reloaded.taktProviders).toEqual({
+      assistant: { provider: 'claude', model: 'haiku' },
+    });
+
+    const raw = readFileSync(getGlobalConfigPath(), 'utf-8');
+    expect(raw).toContain('takt_providers:');
+    expect(raw).toContain('assistant:');
+    expect(raw).toContain('provider: claude');
+    expect(raw).toContain('model: haiku');
+  });
+
+  it('should fail fast on load when takt_providers.assistant has incompatible provider/model', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'takt_providers:',
+        '  assistant:',
+        '    provider: codex',
+        '    model: opus',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    expect(() => loadGlobalConfig()).toThrow(/Claude model alias/);
+  });
+
+  it('should fail fast on save when taktProviders is set without assistant', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+    const config = loadGlobalConfig();
+    config.taktProviders = {} as unknown as NonNullable<typeof config.taktProviders>;
+
+    expect(() => saveGlobalConfig(config)).toThrow(/taktProviders\.assistant/);
+  });
+
+  it('should fail fast on save when taktProviders.assistant has incompatible provider/model', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+    const config = loadGlobalConfig();
+    config.taktProviders = {
+      assistant: {
+        provider: 'codex',
+        model: 'opus',
+      },
+    };
+
+    expect(() => saveGlobalConfig(config)).toThrow(/Claude model alias/);
+  });
+
+  it('should fail fast on save when taktProviders.assistant is empty object', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+    const config = loadGlobalConfig();
+    config.taktProviders = {
+      assistant: {} as NonNullable<typeof config.taktProviders>['assistant'],
+    };
+
+    expect(() => saveGlobalConfig(config)).toThrow(/takt_providers\.assistant/);
   });
 
   it('should return the same cached object on subsequent calls', () => {
@@ -744,6 +851,138 @@ describe('loadGlobalConfig', () => {
 
       const reloaded = loadGlobalConfig();
       expect(reloaded.runtime).toEqual({ prepare: ['gradle', 'node'] });
+    });
+
+    it('should load piece_runtime_prepare from config.yaml', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(
+        getGlobalConfigPath(),
+        [
+          'language: en',
+          'piece_runtime_prepare:',
+          '  custom_scripts: true',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const config = loadGlobalConfig();
+      expect(config.pieceRuntimePrepare).toEqual({ customScripts: true });
+    });
+
+    it('should save and reload piece_runtime_prepare', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+      const config = loadGlobalConfig();
+      config.pieceRuntimePrepare = { customScripts: true };
+      saveGlobalConfig(config);
+      invalidateGlobalConfigCache();
+
+      const reloaded = loadGlobalConfig();
+      expect(reloaded.pieceRuntimePrepare).toEqual({ customScripts: true });
+    });
+  });
+
+  describe('piece_arpeggio global config', () => {
+    it('should load piece_arpeggio from config.yaml', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(
+        getGlobalConfigPath(),
+        [
+          'language: en',
+          'piece_arpeggio:',
+          '  custom_data_source_modules: true',
+          '  custom_merge_inline_js: false',
+          '  custom_merge_files: true',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const config = loadGlobalConfig();
+      expect(config.pieceArpeggio).toEqual({
+        customDataSourceModules: true,
+        customMergeInlineJs: false,
+        customMergeFiles: true,
+      });
+    });
+
+    it('should save and reload piece_arpeggio', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+      const config = loadGlobalConfig();
+      config.pieceArpeggio = { customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false };
+      saveGlobalConfig(config);
+      invalidateGlobalConfigCache();
+
+      const reloaded = loadGlobalConfig();
+      expect(reloaded.pieceArpeggio).toEqual({ customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false });
+    });
+  });
+
+  describe('sync_conflict_resolver global config', () => {
+    it('should load sync_conflict_resolver from config.yaml', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(
+        getGlobalConfigPath(),
+        [
+          'language: en',
+          'sync_conflict_resolver:',
+          '  auto_approve_tools: true',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const config = loadGlobalConfig();
+      expect(config.syncConflictResolver).toEqual({ autoApproveTools: true });
+    });
+
+    it('should save and reload sync_conflict_resolver', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+      const config = loadGlobalConfig();
+      config.syncConflictResolver = { autoApproveTools: true };
+      saveGlobalConfig(config);
+      invalidateGlobalConfigCache();
+
+      const reloaded = loadGlobalConfig();
+      expect(reloaded.syncConflictResolver).toEqual({ autoApproveTools: true });
+    });
+  });
+
+  describe('piece_mcp_servers global config', () => {
+    it('should load piece_mcp_servers from config.yaml', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(
+        getGlobalConfigPath(),
+        ['language: en', 'piece_mcp_servers:', '  stdio: true', '  sse: false', '  http: true'].join('\n'),
+        'utf-8',
+      );
+
+      const config = loadGlobalConfig();
+      expect(config.pieceMcpServers).toEqual({ stdio: true, sse: false, http: true });
+    });
+
+    it('should save and reload piece_mcp_servers', () => {
+      const taktDir = join(testHomeDir, '.takt');
+      mkdirSync(taktDir, { recursive: true });
+      writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+      const config = loadGlobalConfig();
+      config.pieceMcpServers = { stdio: true, sse: true };
+      saveGlobalConfig(config);
+      invalidateGlobalConfigCache();
+
+      const reloaded = loadGlobalConfig();
+      expect(reloaded.pieceMcpServers).toEqual({ stdio: true, sse: true });
     });
   });
 

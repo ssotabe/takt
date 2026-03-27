@@ -42,6 +42,7 @@ vi.mock('../infra/config/resolveConfigValue.js', () => ({
 
 import { loadPiece } from '../infra/config/index.js';
 import { listBuiltinPieceNames } from '../infra/config/loaders/pieceResolver.js';
+import { loadGlobalConfig } from '../infra/config/global/globalConfig.js';
 
 // --- Test helpers ---
 
@@ -81,33 +82,33 @@ describe('Piece Loader IT: builtin piece loading', () => {
     expect(config).toBeNull();
   });
 
-  it('should include and load fill-e2e as a builtin piece', () => {
-    expect(builtinNames).toContain('fill-e2e');
+  it('should include and load audit-e2e as a builtin piece', () => {
+    expect(builtinNames).toContain('audit-e2e');
 
-    const config = loadPiece('fill-e2e', testDir);
+    const config = loadPiece('audit-e2e', testDir);
     expect(config).not.toBeNull();
 
-    const planMovement = config!.movements.find((movement) => movement.name === 'plan_test');
-    const implementMovement = config!.movements.find((movement) => movement.name === 'implement_test');
+    const planMovement = config!.movements.find((movement) => movement.name === 'plan');
+    const auditMovement = config!.movements.find((movement) => movement.name === 'audit');
 
     expect(planMovement).toBeDefined();
-    expect(implementMovement).toBeDefined();
+    expect(auditMovement).toBeDefined();
   });
 
-  it('should load fill-e2e as a builtin piece in ja locale', () => {
+  it('should load audit-e2e as a builtin piece in ja locale', () => {
     languageState.value = 'ja';
 
     const jaBuiltinNames = listBuiltinPieceNames(testDir, { includeDisabled: true });
-    expect(jaBuiltinNames).toContain('fill-e2e');
+    expect(jaBuiltinNames).toContain('audit-e2e');
 
-    const config = loadPiece('fill-e2e', testDir);
+    const config = loadPiece('audit-e2e', testDir);
     expect(config).not.toBeNull();
 
-    const planMovement = config!.movements.find((movement) => movement.name === 'plan_test');
-    const implementMovement = config!.movements.find((movement) => movement.name === 'implement_test');
+    const planMovement = config!.movements.find((movement) => movement.name === 'plan');
+    const auditMovement = config!.movements.find((movement) => movement.name === 'audit');
 
     expect(planMovement).toBeDefined();
-    expect(implementMovement).toBeDefined();
+    expect(auditMovement).toBeDefined();
   });
 });
 
@@ -547,16 +548,18 @@ movements:
 
 describe('Piece Loader IT: mcp_servers parsing', () => {
   let testDir: string;
+  const loadGlobalConfigMock = vi.mocked(loadGlobalConfig);
 
   beforeEach(() => {
     testDir = createTestDir();
+    loadGlobalConfigMock.mockReturnValue({});
   });
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('should parse mcp_servers from YAML to PieceMovement.mcpServers', () => {
+  it('should reject stdio mcp_servers from piece YAML by default', () => {
     const piecesDir = join(testDir, '.takt', 'pieces');
     mkdirSync(piecesDir, { recursive: true });
 
@@ -585,17 +588,7 @@ movements:
     instruction: "Run E2E tests"
 `);
 
-    const config = loadPiece('with-mcp', testDir);
-
-    expect(config).not.toBeNull();
-    const e2eStep = config!.movements.find((s) => s.name === 'e2e-test');
-    expect(e2eStep).toBeDefined();
-    expect(e2eStep!.mcpServers).toEqual({
-      playwright: {
-        command: 'npx',
-        args: ['-y', '@anthropic-ai/mcp-server-playwright'],
-      },
-    });
+    expect(() => loadPiece('with-mcp', testDir)).toThrow(/piece_mcp_servers/);
   });
 
   it('should allow movement without mcp_servers', () => {
@@ -625,7 +618,7 @@ movements:
     expect(implementStep!.mcpServers).toBeUndefined();
   });
 
-  it('should parse mcp_servers with multiple servers and transports', () => {
+  it('should reject mcp_servers with multiple transports by default', () => {
     const piecesDir = join(testDir, '.takt', 'pieces');
     mkdirSync(piecesDir, { recursive: true });
 
@@ -653,20 +646,162 @@ movements:
     instruction: "Run tests"
 `);
 
-    const config = loadPiece('multi-mcp', testDir);
+    expect(() => loadPiece('multi-mcp', testDir)).toThrow(/piece_mcp_servers/);
+  });
+
+  it('should allow http/sse mcp_servers only when project config enables them', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    writeFileSync(
+      join(testDir, '.takt', 'config.yaml'),
+      ['piece_mcp_servers:', '  http: true', '  sse: true'].join('\n'),
+      'utf-8',
+    );
+
+    writeFileSync(join(piecesDir, 'remote-mcp.yaml'), `
+name: remote-mcp
+description: Piece with remote MCP servers
+max_movements: 5
+initial_movement: test
+
+movements:
+  - name: test
+    persona: coder
+    mcp_servers:
+      remote-api:
+        type: http
+        url: https://example.com/mcp
+      stream-api:
+        type: sse
+        url: https://example.com/sse
+    rules:
+      - condition: Done
+        next: COMPLETE
+    instruction: "Run tests"
+`);
+
+    const config = loadPiece('remote-mcp', testDir);
 
     expect(config).not.toBeNull();
     const testStep = config!.movements.find((s) => s.name === 'test');
-    expect(testStep).toBeDefined();
-    expect(testStep!.mcpServers).toEqual({
+    expect(testStep?.mcpServers).toEqual({
+      'remote-api': {
+        type: 'http',
+        url: 'https://example.com/mcp',
+      },
+      'stream-api': {
+        type: 'sse',
+        url: 'https://example.com/sse',
+      },
+    });
+  });
+
+  it('should allow stdio mcp_servers only when project config enables them', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    writeFileSync(join(testDir, '.takt', 'config.yaml'), 'piece_mcp_servers:\n  stdio: true\n');
+
+    writeFileSync(join(piecesDir, 'with-mcp.yaml'), `
+name: with-mcp
+description: Piece with MCP servers
+max_movements: 5
+initial_movement: e2e-test
+
+movements:
+  - name: e2e-test
+    persona: coder
+    mcp_servers:
+      playwright:
+        command: npx
+        args: ["-y", "@anthropic-ai/mcp-server-playwright"]
+    rules:
+      - condition: Done
+        next: COMPLETE
+    instruction: "Run E2E tests"
+`);
+
+    const config = loadPiece('with-mcp', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.movements.find((s) => s.name === 'e2e-test')?.mcpServers).toEqual({
       playwright: {
         command: 'npx',
         args: ['-y', '@anthropic-ai/mcp-server-playwright'],
       },
-      'remote-api': {
-        type: 'http',
-        url: 'http://localhost:3000/mcp',
-        headers: { Authorization: 'Bearer token123' },
+    });
+  });
+
+  it('should deny transport when project config explicitly overrides global true with false', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    loadGlobalConfigMock.mockReturnValue({
+      pieceMcpServers: { stdio: true },
+    });
+    writeFileSync(join(testDir, '.takt', 'config.yaml'), 'piece_mcp_servers:\n  stdio: false\n');
+
+    writeFileSync(join(piecesDir, 'denied-mcp.yaml'), `
+name: denied-mcp
+description: Piece with stdio MCP denied by project
+max_movements: 5
+initial_movement: test
+
+movements:
+  - name: test
+    persona: coder
+    mcp_servers:
+      playwright:
+        command: npx
+        args: ["-y", "@anthropic-ai/mcp-server-playwright"]
+    rules:
+      - condition: Done
+        next: COMPLETE
+    instruction: "Run tests"
+`);
+
+    expect(() => loadPiece('denied-mcp', testDir)).toThrow(/piece_mcp_servers/);
+  });
+
+  it('should preserve globally allowed transports when project config enables another transport', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    loadGlobalConfigMock.mockReturnValue({
+      pieceMcpServers: { stdio: true },
+    });
+    writeFileSync(join(testDir, '.takt', 'config.yaml'), 'piece_mcp_servers:\n  sse: true\n');
+
+    writeFileSync(join(piecesDir, 'mixed-mcp.yaml'), `
+name: mixed-mcp
+description: Piece with stdio and sse MCP servers
+max_movements: 5
+initial_movement: test
+
+movements:
+  - name: test
+    persona: coder
+    mcp_servers:
+      playwright:
+        command: npx
+        args: ["-y", "@anthropic-ai/mcp-server-playwright"]
+      stream-api:
+        type: sse
+        url: https://example.com/sse
+    rules:
+      - condition: Done
+        next: COMPLETE
+    instruction: "Run tests"
+`);
+
+    const config = loadPiece('mixed-mcp', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.movements.find((s) => s.name === 'test')?.mcpServers).toEqual({
+      playwright: {
+        command: 'npx',
+        args: ['-y', '@anthropic-ai/mcp-server-playwright'],
+      },
+      'stream-api': {
+        type: 'sse',
+        url: 'https://example.com/sse',
       },
     });
   });
@@ -707,5 +842,285 @@ description: Missing movements
 `);
 
     expect(() => loadPiece('incomplete', testDir)).toThrow();
+  });
+});
+
+
+describe('Piece Loader IT: piece runtime.prepare policy', () => {
+  let testDir: string;
+  const loadGlobalConfigMock = vi.mocked(loadGlobalConfig);
+
+  beforeEach(() => {
+    testDir = createTestDir();
+    loadGlobalConfigMock.mockReturnValue({});
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('rejects piece runtime.prepare custom scripts by default', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(piecesDir, 'runtime-custom.yaml'), `
+name: runtime-custom
+piece_config:
+  runtime:
+    prepare:
+      - ./setup.sh
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    expect(() => loadPiece('runtime-custom', testDir)).toThrow(/piece_runtime_prepare\.custom_scripts/);
+  });
+
+  it('allows piece runtime.prepare gradle preset by default', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(piecesDir, 'runtime-gradle.yaml'), `
+name: runtime-gradle
+piece_config:
+  runtime:
+    prepare:
+      - gradle
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    const config = loadPiece('runtime-gradle', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.runtime).toEqual({ prepare: ['gradle'] });
+  });
+
+  it('allows piece runtime.prepare node preset by default', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(piecesDir, 'runtime-node.yaml'), `
+name: runtime-node
+piece_config:
+  runtime:
+    prepare:
+      - node
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    const config = loadPiece('runtime-node', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.runtime).toEqual({ prepare: ['node'] });
+  });
+
+  it('allows piece runtime.prepare custom scripts when project config enables them', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(testDir, '.takt', 'config.yaml'), 'piece_runtime_prepare:\n  custom_scripts: true\n');
+    writeFileSync(join(piecesDir, 'runtime-custom.yaml'), `
+name: runtime-custom
+piece_config:
+  runtime:
+    prepare:
+      - ./setup.sh
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    const config = loadPiece('runtime-custom', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.runtime).toEqual({ prepare: ['./setup.sh'] });
+  });
+
+  it('rejects piece runtime.prepare custom scripts when global allows and project explicitly denies', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    loadGlobalConfigMock.mockReturnValue({
+      pieceRuntimePrepare: { customScripts: true },
+    });
+    writeFileSync(
+      join(testDir, '.takt', 'config.yaml'),
+      'piece_runtime_prepare:\n  custom_scripts: false\n',
+    );
+    writeFileSync(join(piecesDir, 'runtime-custom.yaml'), `
+name: runtime-custom
+piece_config:
+  runtime:
+    prepare:
+      - ./setup.sh
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    expect(() => loadPiece('runtime-custom', testDir)).toThrow(/piece_runtime_prepare\.custom_scripts/);
+  });
+
+  it('allows piece runtime.prepare custom scripts when global denies and project explicitly allows', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    loadGlobalConfigMock.mockReturnValue({
+      pieceRuntimePrepare: { customScripts: false },
+    });
+    writeFileSync(
+      join(testDir, '.takt', 'config.yaml'),
+      'piece_runtime_prepare:\n  custom_scripts: true\n',
+    );
+    writeFileSync(join(piecesDir, 'runtime-custom.yaml'), `
+name: runtime-custom
+piece_config:
+  runtime:
+    prepare:
+      - ./setup.sh
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    const config = loadPiece('runtime-custom', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.runtime).toEqual({ prepare: ['./setup.sh'] });
+  });
+
+  it('preserves globally allowed runtime.prepare custom scripts when project config sets the policy block', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    loadGlobalConfigMock.mockReturnValue({
+      pieceRuntimePrepare: { customScripts: true },
+    });
+    writeFileSync(join(testDir, '.takt', 'config.yaml'), 'piece_runtime_prepare: {}\n');
+    writeFileSync(join(piecesDir, 'runtime-custom.yaml'), `
+name: runtime-custom
+piece_config:
+  runtime:
+    prepare:
+      - ./setup.sh
+movements:
+  - name: implement
+    instruction: "Do the work"
+`);
+
+    const config = loadPiece('runtime-custom', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.runtime).toEqual({ prepare: ['./setup.sh'] });
+  });
+});
+
+describe('Piece Loader IT: piece Arpeggio policy', () => {
+  let testDir: string;
+  const loadGlobalConfigMock = vi.mocked(loadGlobalConfig);
+
+  beforeEach(() => {
+    testDir = createTestDir();
+    loadGlobalConfigMock.mockReturnValue({});
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('rejects custom Arpeggio capabilities by default', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    writeFileSync(join(testDir, 'rows.csv'), 'value\nhello\n');
+    writeFileSync(join(testDir, 'prompt.md'), 'Summarize {{rows}}');
+
+    writeFileSync(join(piecesDir, 'arpeggio-custom.yaml'), `
+name: arpeggio-custom
+movements:
+  - name: summarize
+    instruction: "unused"
+    arpeggio:
+      source: csv
+      source_path: ../../rows.csv
+      template: ../../prompt.md
+      merge:
+        strategy: custom
+        inline_js: 'return results.map(r => r.content).join(\"\\n\");'
+`);
+
+    expect(() => loadPiece('arpeggio-custom', testDir)).toThrow(/piece_arpeggio\.custom_merge_inline_js/);
+  });
+
+  it('allows custom Arpeggio capabilities when project config enables them', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    writeFileSync(
+      join(testDir, '.takt', 'config.yaml'),
+      [
+        'piece_arpeggio:',
+        '  custom_data_source_modules: true',
+        '  custom_merge_inline_js: true',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(join(testDir, 'rows.csv'), 'value\nhello\n');
+    writeFileSync(join(testDir, 'prompt.md'), 'Summarize {{rows}}');
+
+    writeFileSync(join(piecesDir, 'arpeggio-custom.yaml'), `
+name: arpeggio-custom
+movements:
+  - name: summarize
+    instruction: "unused"
+    arpeggio:
+      source: custom-source
+      source_path: ../../rows.csv
+      template: ../../prompt.md
+      merge:
+        strategy: custom
+        inline_js: 'return results.map(r => r.content).join(\"\\n\");'
+`);
+
+    const config = loadPiece('arpeggio-custom', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.movements[0]?.arpeggio?.source).toBe('custom-source');
+    expect(config!.movements[0]?.arpeggio?.merge.inlineJs).toContain('join');
+  });
+
+  it('preserves globally allowed Arpeggio capabilities when project config enables another one', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+    loadGlobalConfigMock.mockReturnValue({
+      pieceArpeggio: { customDataSourceModules: true },
+    });
+    writeFileSync(
+      join(testDir, '.takt', 'config.yaml'),
+      ['piece_arpeggio:', '  custom_merge_inline_js: true'].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(join(testDir, 'rows.csv'), 'value\nhello\n');
+    writeFileSync(join(testDir, 'prompt.md'), 'Summarize {{rows}}');
+
+    writeFileSync(join(piecesDir, 'arpeggio-precedence.yaml'), `
+name: arpeggio-precedence
+movements:
+  - name: summarize
+    instruction: "unused"
+    arpeggio:
+      source: custom-source
+      source_path: ../../rows.csv
+      template: ../../prompt.md
+      merge:
+        strategy: custom
+        inline_js: 'return results.map(r => r.content).join(\"\\n\");'
+`);
+
+    const config = loadPiece('arpeggio-precedence', testDir);
+
+    expect(config).not.toBeNull();
+    expect(config!.movements[0]?.arpeggio?.source).toBe('custom-source');
+    expect(config!.movements[0]?.arpeggio?.merge.inlineJs).toContain('join');
   });
 });

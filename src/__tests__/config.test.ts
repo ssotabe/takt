@@ -71,7 +71,7 @@ describe('getBuiltinPiece', () => {
     expect(piece!.name).toBe('default');
   });
 
-  it('should resolve builtin instruction_template without projectCwd', () => {
+  it('should resolve builtin instruction without projectCwd', () => {
     const piece = getBuiltinPiece('default', process.cwd());
     expect(piece).not.toBeNull();
 
@@ -256,7 +256,7 @@ describe('loadPiece (builtin fallback)', () => {
     expect(piece).toBeNull();
   });
 
-  it('should load builtin pieces like default, research, fill-e2e', () => {
+  it('should load builtin pieces like default, research, audit-e2e', () => {
     const defaultPiece = loadPiece('default', process.cwd());
     expect(defaultPiece).not.toBeNull();
     expect(defaultPiece!.name).toBe('default');
@@ -265,9 +265,9 @@ describe('loadPiece (builtin fallback)', () => {
     expect(research).not.toBeNull();
     expect(research!.name).toBe('research');
 
-    const fillE2e = loadPiece('fill-e2e', process.cwd());
-    expect(fillE2e).not.toBeNull();
-    expect(fillE2e!.name).toBe('fill-e2e');
+    const auditE2e = loadPiece('audit-e2e', process.cwd());
+    expect(auditE2e).not.toBeNull();
+    expect(auditE2e!.name).toBe('audit-e2e');
   });
 });
 
@@ -621,7 +621,7 @@ describe('listPieces (builtin fallback)', () => {
   it('should include builtin pieces', () => {
     const pieces = listPieces(testDir);
     expect(pieces).toContain('default');
-    expect(pieces).toContain('fill-e2e');
+    expect(pieces).toContain('audit-e2e');
   });
 
   it('should return sorted list', () => {
@@ -888,6 +888,18 @@ describe('analytics config resolution', () => {
       eventsPath: '/tmp/project-analytics',
       retentionDays: 14,
     });
+  });
+
+  it('should resolve language as project > global in resolveConfigValue', () => {
+    const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
+    mkdirSync(globalConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, 'config.yaml'), 'language: en\n');
+
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), 'language: ja\n');
+
+    expect(resolveConfigValue(testDir, 'language')).toBe('ja');
   });
 
   it('should expand "~/" in global analytics.events_path when resolved', () => {
@@ -1555,8 +1567,9 @@ describe('provider-based session management', () => {
 
       const sessions = loadPersonaSessions(testDir, 'codex');
       expect(sessions.coder).toBe('codex-session');
+      expect(sessions['coder:codex']).toBe('codex-session');
       // Old claude sessions should not remain
-      expect(Object.keys(sessions)).toHaveLength(1);
+      expect(sessions['coder:claude']).toBeUndefined();
     });
 
     it('should store provider in session data', () => {
@@ -1594,7 +1607,8 @@ describe('provider-based session management', () => {
 
       const sessions = loadWorktreeSessions(testDir, worktreePath, 'codex');
       expect(sessions.coder).toBe('codex-session');
-      expect(Object.keys(sessions)).toHaveLength(1);
+      expect(sessions['coder:codex']).toBe('codex-session');
+      expect(sessions['coder:claude']).toBeUndefined();
     });
 
     it('should store provider in session data', () => {

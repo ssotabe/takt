@@ -14,6 +14,7 @@ import {
   resolveConfigValues,
   isVerboseMode,
 } from '../../infra/config/index.js';
+import { initGitProvider } from '../../infra/git/index.js';
 import { setQuietMode } from '../../shared/context.js';
 import { setLogLevel } from '../../shared/ui/index.js';
 import { initDebugLogger, createLogger, setVerboseConsole } from '../../shared/utils/index.js';
@@ -40,7 +41,7 @@ program
 
 // --- Global options ---
 program
-  .option('-i, --issue <number>', 'GitHub issue number (equivalent to #N)', (val: string) => parseInt(val, 10))
+  .option('-i, --issue <number>', 'Issue number (equivalent to #N)', (val: string) => parseInt(val, 10))
   .option('--pr <number>', 'PR number to fetch review comments and fix', (val: string) => parseInt(val, 10))
   .option('-w, --piece <name>', 'Piece name or path to piece file')
   .option('-b, --branch <name>', 'Branch name (auto-generated if omitted)')
@@ -49,7 +50,7 @@ program
   .option('--repo <owner/repo>', 'Repository (defaults to current)')
   .option('--provider <name>', 'Override agent provider (claude|codex|opencode|cursor|copilot|mock)')
   .option('--model <name>', 'Override agent model')
-  .option('-t, --task <string>', 'Task content (as alternative to GitHub issue)')
+  .option('-t, --task <string>', 'Task content (as alternative to issue reference)')
   .option('--pipeline', 'Pipeline mode: non-interactive, no worktree, direct branch creation')
   .option('--skip-git', 'Skip branch creation, commit, and push (pipeline mode)')
   .option('-q, --quiet', 'Minimal output mode: suppress AI output (for CI)')
@@ -67,6 +68,7 @@ export async function runPreActionHook(): Promise<void> {
 
   await initGlobalDirs({ nonInteractive: pipelineMode });
   initProjectDirs(resolvedCwd);
+  initGitProvider(resolvedCwd);
 
   const verbose = isVerboseMode(resolvedCwd);
   initDebugLogger(verbose ? { enabled: true } : undefined, resolvedCwd);

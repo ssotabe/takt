@@ -7,21 +7,28 @@
 
 Extract requirements from the task spec and verify each one individually against actual code.
 
-| # | Requirement (extracted from task spec) | Met | Evidence (file:line) |
-|---|---------------------------------------|-----|---------------------|
+| # | Decomposed requirement | Met | Evidence (file:line) |
+|---|------------------------|-----|---------------------|
 | 1 | {requirement 1} | ✅/❌ | `src/file.ts:42` |
 | 2 | {requirement 2} | ✅/❌ | `src/file.ts:55` |
 
+- If a sentence contains multiple conditions, split it into the smallest independently verifiable rows
+- Do not combine parallel conditions such as `A/B`, `global/project`, `JSON/leaf`, `allow/deny`, or `read/write` into one row
 - If any ❌ exists, REJECT is mandatory
 - ✅ without evidence is invalid (must verify against actual code)
+- Do not mark a row as ✅ when the evidence covers only part of the cases
 - Do not rely on plan report's judgment; independently verify each requirement
 
 ## Validation Summary
 | Item | Status | Verification Method |
 |------|--------|-------------------|
-| Tests | ✅ | `npm test` (N passed) |
-| Build | ✅ | `npm run build` succeeded |
-| Functional check | ✅ | Main flow verified |
+| Tests | ✅ / ⚠️ / ❌ | {Execution log, report, CI result, or why unverified} |
+| Build | ✅ / ⚠️ / ❌ | {Execution log, report, CI result, or why unverified} |
+| Functional check | ✅ / ⚠️ / ❌ | {Evidence used, or state that it was not verified} |
+
+- Do not claim success/failure/not-runnable for commands that were never executed
+- When using `⚠️`, explain the missing evidence and the verified scope in the method column
+- If report text conflicts with execution evidence, treat that inconsistency itself as a finding
 
 ## Current Iteration Findings (new)
 | # | finding_id | Item | Evidence | Reason | Required Action |

@@ -25,6 +25,8 @@ movements:
   - name: plan
     edit: false
     persona: planner
+    policy:
+      - design-planning
     knowledge:
       - frontend
       - backend
@@ -50,7 +52,7 @@ movements:
     output_contracts:
       report:
         - name: plan.md
-          format: plan
+          format: plan-frontend
   - name: implement
     edit: true
     persona: coder

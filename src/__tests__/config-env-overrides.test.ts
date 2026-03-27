@@ -66,6 +66,95 @@ describe('config env overrides', () => {
     });
   });
 
+  it('should apply TAKT_PIECE_RUNTIME_PREPARE JSON override for global config', () => {
+    process.env.TAKT_PIECE_RUNTIME_PREPARE = '{"custom_scripts":true}';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_runtime_prepare).toEqual({
+      custom_scripts: true,
+    });
+  });
+
+  it('should apply TAKT_PIECE_RUNTIME_PREPARE_CUSTOM_SCRIPTS override for global config', () => {
+    process.env.TAKT_PIECE_RUNTIME_PREPARE_CUSTOM_SCRIPTS = 'false';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_runtime_prepare).toEqual({
+      custom_scripts: false,
+    });
+  });
+
+  it('should apply TAKT_PIECE_RUNTIME_PREPARE_CUSTOM_SCRIPTS override for project config', () => {
+    process.env.TAKT_PIECE_RUNTIME_PREPARE_CUSTOM_SCRIPTS = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyProjectConfigEnvOverrides(raw);
+
+    expect(raw.piece_runtime_prepare).toEqual({
+      custom_scripts: true,
+    });
+  });
+
+  it('should apply TAKT_PIECE_ARPEGGIO JSON override for global config', () => {
+    process.env.TAKT_PIECE_ARPEGGIO = '{"custom_data_source_modules":true,"custom_merge_inline_js":false}';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_arpeggio).toEqual({
+      custom_data_source_modules: true,
+      custom_merge_inline_js: false,
+    });
+  });
+
+  it('should apply TAKT_PIECE_ARPEGGIO_CUSTOM_MERGE_INLINE_JS override for global config', () => {
+    process.env.TAKT_PIECE_ARPEGGIO_CUSTOM_MERGE_INLINE_JS = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_arpeggio).toEqual({
+      custom_merge_inline_js: true,
+    });
+  });
+
+  it('should apply TAKT_PIECE_ARPEGGIO JSON override for project config', () => {
+    process.env.TAKT_PIECE_ARPEGGIO = '{"custom_merge_files":true}';
+
+    const raw: Record<string, unknown> = {};
+    applyProjectConfigEnvOverrides(raw);
+
+    expect(raw.piece_arpeggio).toEqual({
+      custom_merge_files: true,
+    });
+  });
+
+  it('should apply TAKT_PIECE_ARPEGGIO_CUSTOM_MERGE_FILES override for global config', () => {
+    process.env.TAKT_PIECE_ARPEGGIO_CUSTOM_MERGE_FILES = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_arpeggio).toEqual({
+      custom_merge_files: true,
+    });
+  });
+
+  it('should apply TAKT_PIECE_ARPEGGIO_CUSTOM_DATA_SOURCE_MODULES override for project config', () => {
+    process.env.TAKT_PIECE_ARPEGGIO_CUSTOM_DATA_SOURCE_MODULES = 'false';
+
+    const raw: Record<string, unknown> = {};
+    applyProjectConfigEnvOverrides(raw);
+
+    expect(raw.piece_arpeggio).toEqual({
+      custom_data_source_modules: false,
+    });
+  });
+
   it('should apply analytics env overrides for global config', () => {
     process.env.TAKT_ANALYTICS_ENABLED = 'true';
     process.env.TAKT_ANALYTICS_EVENTS_PATH = '/tmp/global-analytics';
@@ -213,6 +302,75 @@ describe('config env overrides', () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it('should apply TAKT_SYNC_CONFLICT_RESOLVER JSON override for global config', () => {
+    process.env.TAKT_SYNC_CONFLICT_RESOLVER = '{"auto_approve_tools":true}';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.sync_conflict_resolver).toEqual({
+      auto_approve_tools: true,
+    });
+  });
+
+  it('should apply TAKT_SYNC_CONFLICT_RESOLVER_AUTO_APPROVE_TOOLS override for global config', () => {
+    process.env.TAKT_SYNC_CONFLICT_RESOLVER_AUTO_APPROVE_TOOLS = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.sync_conflict_resolver).toEqual({
+      auto_approve_tools: true,
+    });
+  });
+
+  it('should apply TAKT_SYNC_CONFLICT_RESOLVER_AUTO_APPROVE_TOOLS override for project config', () => {
+    process.env.TAKT_SYNC_CONFLICT_RESOLVER_AUTO_APPROVE_TOOLS = 'false';
+
+    const raw: Record<string, unknown> = {};
+    applyProjectConfigEnvOverrides(raw);
+
+    expect(raw.sync_conflict_resolver).toEqual({
+      auto_approve_tools: false,
+    });
+  });
+
+  it('should apply TAKT_PIECE_MCP_SERVERS JSON override for global config', () => {
+    process.env.TAKT_PIECE_MCP_SERVERS = '{"stdio":true,"sse":false}';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_mcp_servers).toEqual({ stdio: true, sse: false });
+  });
+
+  it('should apply TAKT_PIECE_MCP_SERVERS_STDIO override for global config', () => {
+    process.env.TAKT_PIECE_MCP_SERVERS_STDIO = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_mcp_servers).toEqual({ stdio: true });
+  });
+
+  it('should apply TAKT_PIECE_MCP_SERVERS JSON override for project config', () => {
+    process.env.TAKT_PIECE_MCP_SERVERS = '{"stdio":true,"http":true}';
+
+    const raw: Record<string, unknown> = {};
+    applyProjectConfigEnvOverrides(raw);
+
+    expect(raw.piece_mcp_servers).toEqual({ stdio: true, http: true });
+  });
+
+  it('should apply TAKT_PIECE_MCP_SERVERS_HTTP override for project config', () => {
+    process.env.TAKT_PIECE_MCP_SERVERS_HTTP = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyProjectConfigEnvOverrides(raw);
+
+    expect(raw.piece_mcp_servers).toEqual({ http: true });
   });
 
   it('should apply cursor API key override for global config', () => {

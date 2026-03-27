@@ -204,13 +204,35 @@ return storage.upload(file, options)
 - UI/logic exceeding 50 lines → Separate
 - Has multiple responsibilities → Separate
 
+### Reachability When Adding Features
+
+When adding a new feature or screen, update the paths by which users reach it in the same change set. Framework-specific wiring belongs in domain knowledge.
+
+| Criteria | Judgment |
+|----------|----------|
+| A new feature is implemented but callers, entry points, or navigation are not updated | REJECT |
+| A user-facing feature is added without defining how users reach it | REJECT |
+| Implementation and reachability updates are made in the same change set | OK |
+| A temporary entry path is added and its purpose/removal condition is documented | OK |
+
 ### Dependency Direction
 
 - Upper layers → Lower layers (reverse direction prohibited)
 - Fetch data at the root (View/Controller) and pass it down
 - Children do not know about their parents
 
-### State Management
+### Align execution triggers with actual intent
+
+Dependencies and triggers must match the conditions under which the behavior should actually run again. Do not add triggers only to satisfy linting or implementation convenience if that changes runtime behavior.
+
+| Criteria | Judgment |
+|----------|----------|
+| Dependencies or triggers are expanded only for linting/convenience and create rerun loops | REJECT |
+| Initial processing reruns because of unrelated state changes or recreated callbacks | REJECT |
+| Rerun conditions correspond to URL, filters, explicit refresh actions, or other intended behavior | OK |
+| Initialization and later refetch triggers are designed separately | OK |
+
+## State Management
 
 - Confine state to where it is used
 - Children do not modify state directly (notify parents via events)

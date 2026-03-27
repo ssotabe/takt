@@ -9,10 +9,27 @@
 
 import type { MovementProviderOptions, PieceRuntimeConfig } from './piece-types.js';
 import type { ProviderPermissionProfiles } from './provider-profiles.js';
+import type { VcsProviderType } from './vcs-types.js';
 
 export interface PersonaProviderEntry {
   provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
   model?: string;
+}
+
+export interface TaktProviderEntry {
+  provider: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  model?: string;
+}
+
+export type TaktProviderModelOnlyEntry = {
+  provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  model: string;
+};
+
+export type TaktProviderConfigEntry = TaktProviderEntry | TaktProviderModelOnlyEntry;
+
+export interface TaktProvidersConfig {
+  assistant: TaktProviderConfigEntry;
 }
 
 /** Movement-specific quality gates override */
@@ -82,6 +99,39 @@ export interface PipelineConfig {
   prBodyTemplate?: string;
 }
 
+/** Piece-level runtime.prepare policy */
+export interface PieceRuntimePrepareConfig {
+  /** Allow custom script paths from piece YAML (default: false) */
+  customScripts?: boolean;
+}
+
+/** Piece-level Arpeggio custom capability policy */
+export interface PieceArpeggioConfig {
+  /** Allow non-builtin Arpeggio data sources from piece YAML (default: false) */
+  customDataSourceModules?: boolean;
+  /** Allow inline JS custom merge functions from piece YAML (default: false) */
+  customMergeInlineJs?: boolean;
+  /** Allow external JS custom merge files from piece YAML (default: false) */
+  customMergeFiles?: boolean;
+}
+
+/** Sync conflict resolver configuration */
+export interface SyncConflictResolverConfig {
+  /** Auto-approve conflict resolver tool requests (default: false) */
+  autoApproveTools?: boolean;
+}
+
+/** Piece-level MCP transport policy */
+export interface PieceMcpServersConfig {
+  /** Allow stdio MCP servers from piece YAML (default: false) */
+  stdio?: boolean;
+  /** Allow SSE MCP servers from piece YAML (default: false) */
+  sse?: boolean;
+  /** Allow HTTP MCP servers from piece YAML (default: false) */
+  http?: boolean;
+}
+
+
 /** Notification sound toggles per event timing */
 export interface NotificationSoundEventsConfig {
   /** Warning when iteration limit is reached */
@@ -100,6 +150,8 @@ export interface NotificationSoundEventsConfig {
  * Project-level configuration stored in .takt/config.yaml.
  */
 export interface ProjectConfig {
+  /** UI / builtin resource language override for this project */
+  language?: Language;
   /** Provider selection for agent runtime */
   provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
   /** Model selection for agent runtime */
@@ -112,6 +164,8 @@ export interface ProjectConfig {
   autoPr?: boolean;
   /** Create PR as draft */
   draftPr?: boolean;
+  /** VCS provider selection (github or gitlab) */
+  vcsProvider?: VcsProviderType;
   /** Base branch to clone from (overrides global baseBranch) */
   baseBranch?: string;
   /** Submodule acquisition mode (all or explicit path list) */
@@ -120,6 +174,8 @@ export interface ProjectConfig {
   withSubmodules?: boolean;
   /** Pipeline execution settings */
   pipeline?: PipelineConfig;
+  /** TAKT internal target provider/model overrides */
+  taktProviders?: TaktProvidersConfig;
   /** Per-persona provider/model overrides */
   personaProviders?: Record<string, PersonaProviderEntry>;
   /** Branch name generation strategy */
@@ -142,6 +198,14 @@ export interface ProjectConfig {
   pieceOverrides?: PieceOverrides;
   /** Runtime environment configuration (project-level override) */
   runtime?: PieceRuntimeConfig;
+  /** Piece-level runtime.prepare policy */
+  pieceRuntimePrepare?: PieceRuntimePrepareConfig;
+  /** Piece-level Arpeggio policy */
+  pieceArpeggio?: PieceArpeggioConfig;
+  /** Sync conflict resolver behavior */
+  syncConflictResolver?: SyncConflictResolverConfig;
+  /** Piece-level MCP transport policy */
+  pieceMcpServers?: PieceMcpServersConfig;
 }
 
 /**

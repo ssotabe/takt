@@ -436,6 +436,25 @@ describe('PieceConfigRawSchema', () => {
     });
   });
 
+  it('should parse piece_mcp_servers config blocks', () => {
+    const project = ProjectConfigSchema.parse({
+      piece_mcp_servers: {
+        stdio: true,
+        sse: false,
+        http: true,
+      },
+    } as unknown) as Record<string, unknown>;
+
+    const global = GlobalConfigSchema.parse({
+      piece_mcp_servers: {
+        http: true,
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(project.piece_mcp_servers).toEqual({ stdio: true, sse: false, http: true });
+    expect(global.piece_mcp_servers).toEqual({ http: true });
+  });
+
   it('should allow omitting mcp_servers', () => {
     const config = {
       name: 'test-piece',
@@ -699,6 +718,26 @@ describe('GlobalConfigSchema', () => {
     expect(provider?.network_access).toBe(true);
   });
 
+  it('should parse takt_providers.assistant in global config schema', () => {
+    const result = GlobalConfigSchema.parse({
+      provider: 'codex',
+      model: 'gpt-5.4',
+      takt_providers: {
+        assistant: {
+          provider: 'claude',
+          model: 'haiku',
+        },
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(result.takt_providers).toEqual({
+      assistant: {
+        provider: 'claude',
+        model: 'haiku',
+      },
+    });
+  });
+
   it('should reject persona_providers because it is project-local only', () => {
     expect(() => GlobalConfigSchema.parse({
       persona_providers: {
@@ -724,5 +763,66 @@ describe('ProjectConfigSchema', () => {
     expect(provider?.type).toBe('codex');
     expect(provider?.model).toBe('gpt-5.3');
     expect(provider?.network_access).toBe(false);
+  });
+
+
+  it('should parse piece_runtime_prepare policy block', () => {
+    const result = ProjectConfigSchema.parse({
+      piece_runtime_prepare: {
+        custom_scripts: true,
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(result.piece_runtime_prepare).toEqual({
+      custom_scripts: true,
+    });
+  });
+
+  it('should parse piece_arpeggio policy block', () => {
+    const result = ProjectConfigSchema.parse({
+      piece_arpeggio: {
+        custom_data_source_modules: true,
+        custom_merge_inline_js: false,
+        custom_merge_files: true,
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(result.piece_arpeggio).toEqual({
+      custom_data_source_modules: true,
+      custom_merge_inline_js: false,
+      custom_merge_files: true,
+    });
+  });
+
+  it('should parse takt_providers.assistant in project config schema', () => {
+    const result = ProjectConfigSchema.parse({
+      provider: 'codex',
+      model: 'gpt-5.4',
+      takt_providers: {
+        assistant: {
+          provider: 'claude',
+          model: 'haiku',
+        },
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(result.takt_providers).toEqual({
+      assistant: {
+        provider: 'claude',
+        model: 'haiku',
+      },
+    });
+  });
+
+  it('should parse sync_conflict_resolver config block', () => {
+    const result = ProjectConfigSchema.parse({
+      sync_conflict_resolver: {
+        auto_approve_tools: true,
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(result.sync_conflict_resolver).toEqual({
+      auto_approve_tools: true,
+    });
   });
 });

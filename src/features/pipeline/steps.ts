@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { formatIssueAsTask, buildPrBody, formatPrReviewAsTask } from '../../infra/github/index.js';
-import { getGitProvider, type Issue } from '../../infra/git/index.js';
+import { formatIssueAsTask, buildPrBody, createPullRequestSafely, formatPrReviewAsTask, getGitProvider } from '../../infra/git/index.js';
+import type { Issue, CreatePrResult } from '../../infra/git/index.js';
 import { resolveConfigValue } from '../../infra/config/index.js';
 import { stageAndCommit, resolveBaseBranch, pushBranch, checkoutBranch } from '../../infra/task/index.js';
 import { executeTask, confirmAndCreateWorktree, type TaskExecutionOptions, type PipelineExecutionOptions } from '../tasks/index.js';
@@ -96,14 +96,15 @@ function buildPipelinePrBody(
   return buildPrBody(issue ? [issue] : undefined, report);
 }
 
-function fetchGitHubResource<T>(
+function fetchVcsResource<T>(
   label: string,
+  cwd: string,
   fetch: (provider: ReturnType<typeof getGitProvider>) => T,
 ): T | undefined {
   const gitProvider = getGitProvider();
-  const cliStatus = gitProvider.checkCliStatus();
+  const cliStatus = gitProvider.checkCliStatus(cwd);
   if (!cliStatus.available) {
-    error(cliStatus.error ?? 'gh CLI is not available');
+    error(cliStatus.error);
     return undefined;
   }
   try {
@@ -115,11 +116,13 @@ function fetchGitHubResource<T>(
 }
 
 export function resolveTaskContent(options: PipelineExecutionOptions): TaskContent | undefined {
+  const { cwd } = options;
   if (options.prNumber) {
     info(`Fetching PR #${options.prNumber} review comments...`);
-    const prReview = fetchGitHubResource(
+    const prReview = fetchVcsResource(
       `PR #${options.prNumber}`,
-      (provider) => provider.fetchPrReviewComments(options.prNumber!),
+      cwd,
+      (provider) => provider.fetchPrReviewComments(options.prNumber!, cwd),
     );
     if (!prReview) return undefined;
     const task = formatPrReviewAsTask(prReview);
@@ -132,9 +135,10 @@ export function resolveTaskContent(options: PipelineExecutionOptions): TaskConte
   }
   if (options.issueNumber) {
     info(`Fetching issue #${options.issueNumber}...`);
-    const issue = fetchGitHubResource(
+    const issue = fetchVcsResource(
       `issue #${options.issueNumber}`,
-      (provider) => provider.fetchIssue(options.issueNumber!),
+      cwd,
+      (provider) => provider.fetchIssue(options.issueNumber!, cwd),
     );
     if (!issue) return undefined;
     const task = formatIssueAsTask(issue);
@@ -274,14 +278,14 @@ export function submitPullRequest(
   const report = `Piece \`${piece}\` completed successfully.`;
   const prBody = buildPipelinePrBody(pipelineConfig, taskContent.issue, report);
 
-  const prResult = getGitProvider().createPullRequest(projectCwd, {
+  const prResult: CreatePrResult = createPullRequestSafely(getGitProvider(), {
     branch,
     title: prTitle,
     body: prBody,
     base: resolvedBaseBranch,
     repo: options.repo,
     draft: options.draftPr,
-  });
+  }, projectCwd);
 
   if (prResult.success) {
     success(`PR created: ${prResult.url}`);

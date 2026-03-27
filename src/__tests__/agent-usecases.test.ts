@@ -279,6 +279,12 @@ describe('agent-usecases', () => {
       { id: 'p1', title: 'Part 1', instruction: 'Do 1', timeoutMs: 1000 },
     ]);
     expect(parseParts).not.toHaveBeenCalled();
+    expect(runAgent).toHaveBeenCalledWith('team-leader', expect.any(String), expect.objectContaining({
+      allowedTools: [],
+      permissionMode: 'readonly',
+      maxTurns: 5,
+      outputSchema: { type: 'decomposition', maxParts: 3 },
+    }));
   });
 
   it('decomposeTask は構造化出力がない場合 parseParts にフォールバックする', async () => {
@@ -352,8 +358,10 @@ describe('agent-usecases', () => {
       parts: [{ id: 'p3', title: 'Part 3', instruction: 'Do 3', timeoutMs: undefined }],
     });
     expect(runAgent).toHaveBeenCalledWith('team-leader', expect.stringContaining('original instruction'), expect.objectContaining({
+      allowedTools: [],
       outputSchema: { type: 'more-parts', maxAdditionalParts: 2 },
       permissionMode: 'readonly',
+      maxTurns: 5,
     }));
   });
 

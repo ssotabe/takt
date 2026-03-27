@@ -13,14 +13,16 @@ import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
 import { stageAndCommit } from './git.js';
 
 const log = createLogger('autoCommit');
+const AUTO_COMMIT_PUSH_FAILURE_MESSAGE = 'Push to main repo failed after commit creation.';
+const AUTO_COMMIT_FAILURE_MESSAGE = 'Auto-commit failed.';
 
 export interface AutoCommitResult {
   /** Whether the commit was created successfully */
   success: boolean;
   /** The short commit hash (if committed) */
   commitHash?: string;
-  /** Whether the push was executed successfully */
-  pushed?: boolean;
+  /** Whether the local push back to the main repo failed after commit creation */
+  localPushFailed?: boolean;
   /** Human-readable message */
   message: string;
 }
@@ -45,26 +47,39 @@ export class AutoCommitter {
         log.info('No changes to commit');
       }
 
-      execFileSync('git', ['push', projectDir, 'HEAD'], {
-        cwd: cloneCwd,
-        stdio: 'pipe',
-      });
+      try {
+        execFileSync('git', ['push', projectDir, 'HEAD'], {
+          cwd: cloneCwd,
+          stdio: 'pipe',
+        });
+        log.info('Pushed to main repo', { projectDir });
+      } catch (pushError) {
+        void pushError;
+        log.info('Push to main repo failed after commit creation', {
+          projectDir,
+          outcome: AUTO_COMMIT_PUSH_FAILURE_MESSAGE,
+        });
 
-      log.info('Pushed to main repo', { projectDir });
+        return {
+          success: true,
+          commitHash,
+          localPushFailed: true,
+          message: `Committed: ${commitHash} - ${commitMessage}`,
+        };
+      }
 
       if (!commitHash) {
-        return { success: true, pushed: true, message: 'No changes to commit, pushed existing commits' };
+        return { success: true, message: 'No changes to commit, pushed existing commits' };
       }
 
       return {
         success: true,
         commitHash,
-        pushed: true,
-        message: `Committed & pushed: ${commitHash} - ${commitMessage}`,
+        message: `Committed: ${commitHash} - ${commitMessage}`,
       };
     } catch (err) {
       const errorMessage = getErrorMessage(err);
-      log.error('Auto-commit failed', { error: errorMessage });
+      log.error('Auto-commit failed', { outcome: AUTO_COMMIT_FAILURE_MESSAGE });
 
       return {
         success: false,
