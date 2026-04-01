@@ -67,7 +67,12 @@ export async function postExecutionFlow(options: PostExecutionOptions): Promise<
     return { taskFailed: true, taskError: LOCAL_PUSH_FAILURE_MESSAGE };
   }
 
-  if (commitResult.commitHash && branch && shouldCreatePr) {
+  // NOTE: commitResult.success を使うこと。commitHash は autoCommitAndPush が
+  // 新規コミットを作成した場合のみセットされる。子ワークツリー（roadmap等の
+  // parallel実行）では作業が既にマージコミット済みのため commitHash は undefined
+  // になるが、ブランチには既存コミットがあるため PR 作成は必要。
+  // commitHash でゲートすると silent skip になる（d9957ca で導入したリグレッション）。
+  if (commitResult.success && branch && shouldCreatePr) {
     try {
       pushBranch(projectCwd, branch);
     } catch (pushError) {
