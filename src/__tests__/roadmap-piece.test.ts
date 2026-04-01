@@ -878,7 +878,7 @@ describe('roadmap piece: builtin loading', () => {
 
     for (const slot of executeBatch!.parallel!) {
       expect(slot.kind).toBe('piece_call');
-      expect(slot.call).toBe('default');
+      expect(slot.call).toBe('default-perf');
     }
   });
 
