@@ -14,6 +14,7 @@ import { ReportInstructionBuilder } from './instruction/ReportInstructionBuilder
 import { hasTagBasedRules, getReportFiles } from './evaluation/rule-utils.js';
 import { executeAgent } from '../../agents/agent-usecases.js';
 import { createLogger } from '../../shared/utils/index.js';
+import { buildPhaseExecutionId } from '../../shared/utils/phaseExecutionId.js';
 import { buildSessionKey } from './session-key.js';
 export { runStatusJudgmentPhase, type StatusJudgmentPhaseResult } from './status-judgment-phase.js';
 
@@ -154,10 +155,11 @@ export async function runReportPhase(
     return;
   }
 
-  for (const fileName of reportFiles) {
+  for (const [fileIndex, fileName] of reportFiles.entries()) {
     if (!fileName) {
       throw new Error(`Invalid report file name: ${fileName}`);
     }
+    const sequence = fileIndex + 1;
 
     log.debug('Generating report file', { movement: step.name, fileName });
 
@@ -172,7 +174,7 @@ export async function runReportPhase(
     const reportOptions = ctx.buildResumeOptions(step, currentSessionId, {
       maxTurns: 3,
     });
-    const firstAttempt = await runSingleReportAttempt(step, reportInstruction, reportOptions, ctx);
+    const firstAttempt = await runSingleReportAttempt(step, reportInstruction, reportOptions, ctx, sequence);
     if (firstAttempt.kind === 'blocked') {
       return { blocked: true, response: firstAttempt.response };
     }
@@ -205,7 +207,7 @@ export async function runReportPhase(
       maxTurns: 3,
     });
 
-    const retryAttempt = await runSingleReportAttempt(step, retryInstruction, retryOptions, ctx);
+    const retryAttempt = await runSingleReportAttempt(step, retryInstruction, retryOptions, ctx, sequence);
     if (retryAttempt.kind === 'blocked') {
       return { blocked: true, response: retryAttempt.response };
     }
@@ -234,12 +236,23 @@ async function runSingleReportAttempt(
   instruction: string,
   options: RunAgentOptions,
   ctx: PhaseRunnerContext,
+  sequence: number,
 ): Promise<ReportAttemptResult> {
+  if (!ctx.iteration || !Number.isInteger(ctx.iteration) || ctx.iteration <= 0) {
+    throw new Error(`Report phase requires iteration for movement "${step.name}"`);
+  }
+  const phaseExecutionId = buildPhaseExecutionId({
+    step: step.name,
+    iteration: ctx.iteration,
+    phase: 2,
+    sequence,
+  });
+
   let didEmitPhaseStart = false;
   const callOptions: RunAgentOptions = {
     ...options,
     onPromptResolved: (promptParts) => {
-      ctx.onPhaseStart?.(step, 2, 'report', instruction, promptParts, undefined, ctx.iteration);
+      ctx.onPhaseStart?.(step, 2, 'report', instruction, promptParts, phaseExecutionId, ctx.iteration);
       didEmitPhaseStart = true;
     },
   };
@@ -252,28 +265,28 @@ async function runSingleReportAttempt(
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    ctx.onPhaseComplete?.(step, 2, 'report', '', 'error', errorMsg, undefined, ctx.iteration);
+    ctx.onPhaseComplete?.(step, 2, 'report', '', 'error', errorMsg, phaseExecutionId, ctx.iteration);
     throw error;
   }
 
   if (response.status === 'blocked') {
-    ctx.onPhaseComplete?.(step, 2, 'report', response.content, response.status, undefined, undefined, ctx.iteration);
+    ctx.onPhaseComplete?.(step, 2, 'report', response.content, response.status, undefined, phaseExecutionId, ctx.iteration);
     return { kind: 'blocked', response };
   }
 
   if (response.status !== 'done') {
     const errorMessage = response.error || response.content || 'Unknown error';
-    ctx.onPhaseComplete?.(step, 2, 'report', response.content, response.status, errorMessage, undefined, ctx.iteration);
+    ctx.onPhaseComplete?.(step, 2, 'report', response.content, response.status, errorMessage, phaseExecutionId, ctx.iteration);
     return { kind: 'retryable_failure', errorMessage };
   }
 
   const trimmedContent = response.content.trim();
   if (trimmedContent.length === 0) {
     const errorMessage = 'Report output is empty';
-    ctx.onPhaseComplete?.(step, 2, 'report', response.content, 'error', errorMessage, undefined, ctx.iteration);
+    ctx.onPhaseComplete?.(step, 2, 'report', response.content, 'error', errorMessage, phaseExecutionId, ctx.iteration);
     return { kind: 'retryable_failure', errorMessage };
   }
 
-  ctx.onPhaseComplete?.(step, 2, 'report', response.content, response.status, undefined, undefined, ctx.iteration);
+  ctx.onPhaseComplete?.(step, 2, 'report', response.content, response.status, undefined, phaseExecutionId, ctx.iteration);
   return { kind: 'success', content: trimmedContent, response };
 }

@@ -31,6 +31,7 @@ function createContext(
   return {
     cwd: reportDir,
     reportDir,
+    iteration: 1,
     getSessionId: (_persona: string) => currentSessionId,
     buildResumeOptions: (
       _step,
