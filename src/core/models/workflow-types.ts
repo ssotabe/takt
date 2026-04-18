@@ -251,6 +251,8 @@ export interface AgentWorkflowStep extends WorkflowStepBase {
   qualityGates?: string[];
   parallel?: AgentWorkflowStep[];
   concurrency?: number;
+  timeoutMs?: number;
+  parallelConfig?: { readonly timeoutMs: number };
   arpeggio?: ArpeggioStepConfig;
   teamLeader?: TeamLeaderConfig;
   policyContents?: string[];
@@ -290,6 +292,7 @@ export interface WorkflowCallStep extends WorkflowStepBase {
   call: string;
   overrides?: WorkflowCallOverrides;
   args?: Record<string, WorkflowCallArgValue>;
+  timeoutMs?: number;
   persona?: never;
   session?: never;
   mcpServers?: never;

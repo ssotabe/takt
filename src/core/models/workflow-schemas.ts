@@ -121,9 +121,23 @@ export const TeamLeaderConfigRawSchema = z.object({
   },
 );
 
+const WorkflowCallOverridesRawSchema = z.object({
+  provider: ProviderReferenceSchema.optional(),
+  model: z.string().optional(),
+  provider_options: StepProviderOptionsSchema,
+}).strict().refine(
+  (data) => data.provider !== undefined || data.model !== undefined || data.provider_options !== undefined,
+  {
+    message: "workflow_call overrides require at least one of 'provider', 'model', or 'provider_options'",
+  },
+);
+
 /** Sub-step schema for parallel execution */
 export const ParallelSubStepRawSchema = z.object({
   name: z.string().min(1),
+  kind: z.enum(['agent', 'workflow_call']).optional(),
+  call: z.string().min(1).optional(),
+  overrides: WorkflowCallOverridesRawSchema.optional(),
   persona: z.string().optional(),
   persona_name: z.string().optional(),
   policy: WorkflowFacetRefListOrParamSchema.optional(),
@@ -142,6 +156,7 @@ export const ParallelSubStepRawSchema = z.object({
   output_contracts: OutputContractsFieldSchema,
   quality_gates: QualityGatesSchema,
   pass_previous_response: z.boolean().optional(),
+  timeout_ms: z.number().int().positive().optional(),
 }).superRefine((data, ctx) => {
   data.rules?.forEach((rule, index) => {
     if (rule.return !== undefined) {
@@ -152,21 +167,23 @@ export const ParallelSubStepRawSchema = z.object({
       });
     }
   });
+
+  const isWorkflowCall = data.kind === 'workflow_call' || (data.call != null && data.kind !== 'agent');
+  if (data.kind === 'workflow_call' && !data.call) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['call'], message: "'kind: workflow_call' requires 'call'" });
+  }
+  if (isWorkflowCall) {
+    if (data.persona != null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['persona'], message: "'workflow_call' cannot have 'persona'" });
+    if (data.instruction != null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['instruction'], message: "'workflow_call' cannot have 'instruction'" });
+    if (data.edit != null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['edit'], message: "'workflow_call' cannot have 'edit'" });
+  }
+  if (data.overrides != null && !isWorkflowCall) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['overrides'], message: "'overrides' is only allowed on workflow_call sub-steps" });
+  }
 });
 
 /** Workflow step schema - raw YAML format */
 const WorkflowStepKindSchema = z.enum(['agent', 'system', 'workflow_call']);
-
-const WorkflowCallOverridesRawSchema = z.object({
-  provider: ProviderReferenceSchema.optional(),
-  model: z.string().optional(),
-  provider_options: StepProviderOptionsSchema,
-}).strict().refine(
-  (data) => data.provider !== undefined || data.model !== undefined || data.provider_options !== undefined,
-  {
-    message: "workflow_call overrides require at least one of 'provider', 'model', or 'provider_options'",
-  },
-);
 
 const WorkflowSubworkflowRawSchema = z.object({
   callable: z.boolean().optional(),
@@ -232,6 +249,9 @@ function createWorkflowStepRawSchema(options?: { relaxWorkflowCallConditions?: b
   pass_previous_response: z.boolean().optional(),
   parallel: z.array(ParallelSubStepRawSchema).optional(),
   concurrency: z.number().int().min(1).optional(),
+  parallel_config: z.object({
+    timeout_ms: z.number().int().positive().optional().default(1800000),
+  }).optional(),
   arpeggio: ArpeggioConfigRawSchema.optional(),
   team_leader: TeamLeaderConfigRawSchema.optional(),
 }).refine(
@@ -240,6 +260,9 @@ function createWorkflowStepRawSchema(options?: { relaxWorkflowCallConditions?: b
     message: "'parallel', 'arpeggio', and 'team_leader' are mutually exclusive",
     path: ['parallel'],
   },
+).refine(
+  (data) => data.parallel_config == null || (data.parallel != null && data.parallel.length > 0),
+  { message: "'parallel_config' requires 'parallel'", path: ['parallel_config'] },
 ).superRefine((data, ctx) => {
   if (data.kind !== undefined && data.mode !== undefined) {
     ctx.addIssue({

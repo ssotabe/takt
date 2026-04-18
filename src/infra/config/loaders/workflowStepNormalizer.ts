@@ -67,6 +67,9 @@ export function normalizeStepFromRaw(
   const kind: WorkflowStepKind = getWorkflowStepKind(step);
   const isSystemStep = kind === 'system';
   const isWorkflowCallStep = kind === 'workflow_call';
+  const rawTimeoutMs = 'timeout_ms' in step && typeof (step as Record<string, unknown>).timeout_ms === 'number'
+    ? (step as Record<string, unknown>).timeout_ms as number
+    : undefined;
   const rawPersona = (step as Record<string, unknown>).persona as string | undefined;
   if (rawPersona !== undefined && rawPersona.trim().length === 0) {
     throw new Error(`Step "${step.name}" has an empty persona value`);
@@ -136,6 +139,7 @@ export function normalizeStepFromRaw(
       instruction: '',
       rules,
     };
+    if (rawTimeoutMs != null) normalizedStep.timeoutMs = rawTimeoutMs;
     return normalizedStep;
   }
 
@@ -210,6 +214,11 @@ export function normalizeStepFromRaw(
     if (step.concurrency != null) {
       normalizedStep.concurrency = step.concurrency;
     }
+    if (step.parallel_config) {
+      normalizedStep.parallelConfig = {
+        timeoutMs: step.parallel_config.timeout_ms,
+      };
+    }
   }
 
   const arpeggio = normalizeArpeggio(step.arpeggio, workflowDir);
@@ -217,6 +226,8 @@ export function normalizeStepFromRaw(
 
   const teamLeader = normalizeTeamLeader(step.team_leader, workflowDir, sections, context);
   if (teamLeader) normalizedStep.teamLeader = teamLeader;
+
+  if (rawTimeoutMs != null) normalizedStep.timeoutMs = rawTimeoutMs;
 
   return normalizedStep;
 }
