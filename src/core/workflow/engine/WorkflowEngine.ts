@@ -171,6 +171,7 @@ export class WorkflowEngine extends EventEmitter {
       loopMonitorJudgeRunner: this.loopMonitorJudgeRunner,
       workflowCallRunner: this.workflowCallRunner,
       updatePersonaSession: this.updatePersonaSession.bind(this),
+      updateStepSession: this.updateStepSession.bind(this),
       emitReport: (step, filePath, fileName) => this.emit('step:report', step, filePath, fileName),
     });
     workflowRunExecutors.set(this, () => runWorkflowToCompletion({
@@ -264,6 +265,11 @@ export class WorkflowEngine extends EventEmitter {
     if (this.options.onSessionUpdate && sessionId !== previousSessionId) {
       this.options.onSessionUpdate(persona, sessionId);
     }
+  }
+
+  private updateStepSession(stepName: string, sessionId: string | undefined): void {
+    if (!sessionId) return;
+    this.state.stepSessions.set(stepName, sessionId);
   }
 
   private resolveNextStepFromDone(step: WorkflowStep, response: AgentResponse): string {

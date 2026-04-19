@@ -109,6 +109,7 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       previousResponseSourcePath: undefined,
       userInputs: [],
       personaSessions: new Map(),
+      stepSessions: new Map(),
       stepIterations: new Map(),
       status: 'running',
     };
@@ -262,6 +263,7 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       previousResponseSourcePath: undefined,
       userInputs: [],
       personaSessions: new Map(),
+      stepSessions: new Map(),
       stepIterations: new Map(),
       status: 'running',
     };
@@ -383,6 +385,7 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       previousResponseSourcePath: undefined,
       userInputs: [],
       personaSessions: new Map(),
+      stepSessions: new Map(),
       stepIterations: new Map(),
       status: 'running',
     };
@@ -485,6 +488,7 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       previousResponseSourcePath: undefined,
       userInputs: [],
       personaSessions: new Map(),
+      stepSessions: new Map(),
       stepIterations: new Map(),
       status: 'running',
     };

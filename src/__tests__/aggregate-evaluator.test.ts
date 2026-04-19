@@ -26,6 +26,7 @@ function makeState(outputs: Record<string, { matchedRuleIndex?: number }>): Work
     stepOutputs,
     userInputs: [],
     personaSessions: new Map(),
+    stepSessions: new Map(),
     stepIterations: new Map(),
     status: 'running',
   };

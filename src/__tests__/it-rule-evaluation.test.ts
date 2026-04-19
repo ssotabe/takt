@@ -67,6 +67,7 @@ function makeState(stepOutputs?: Map<string, AgentResponse>): WorkflowState {
     lastOutput: undefined,
     stepIterations: new Map(),
     personaSessions: new Map(),
+    stepSessions: new Map(),
     userInputs: [],
   };
 }

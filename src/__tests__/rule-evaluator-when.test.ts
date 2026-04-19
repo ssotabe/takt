@@ -14,6 +14,7 @@ function makeState(): WorkflowState {
     effectResults: new Map(),
     userInputs: [],
     personaSessions: new Map(),
+    stepSessions: new Map(),
     stepIterations: new Map(),
     status: 'running',
   };

@@ -38,6 +38,7 @@ interface WorkflowEngineStepCoordinatorDeps {
       task: string,
       maxSteps: number,
       updateSession: (persona: string, sessionId: string | undefined) => void,
+      updateStepSession: (stepName: string, sessionId: string | undefined) => void,
     ) => Promise<{ response: AgentResponse; instruction: string }>;
   };
   arpeggioRunner: {
@@ -76,6 +77,7 @@ interface WorkflowEngineStepCoordinatorDeps {
     resolveRuntime: (step: WorkflowStep & { call: string }) => RuntimeStepResolution;
   };
   updatePersonaSession: (persona: string, sessionId: string | undefined) => void;
+  updateStepSession: (stepName: string, sessionId: string | undefined) => void;
   emitReport: (step: WorkflowStep, filePath: string, fileName: string) => void;
 }
 
@@ -112,6 +114,7 @@ export class WorkflowEngineStepCoordinator {
         this.deps.task,
         this.deps.getMaxSteps(),
         updateSession,
+        this.deps.updateStepSession,
       );
     } else if (step.arpeggio) {
       result = await this.deps.arpeggioRunner.runArpeggioStep(step, this.deps.state);
@@ -140,6 +143,8 @@ export class WorkflowEngineStepCoordinator {
         prebuiltInstruction,
       );
     }
+
+    this.deps.updateStepSession(step.name, result.response.sessionId);
 
     for (const { step: reportedStep, filePath, fileName } of this.deps.stepExecutor.drainReportFiles()) {
       this.deps.emitReport(reportedStep, filePath, fileName);

@@ -30,6 +30,7 @@ function createBuilder(step: WorkflowStep, engineOverrides: Partial<WorkflowEngi
     () => '/project',
     () => '/project',
     () => undefined,
+    () => undefined,
     () => '.takt/runs/sample/reports',
     () => 'ja',
     () => [{ name: step.name }],
@@ -597,6 +598,43 @@ describe('OptionsBuilder.buildAgentOptions', () => {
       },
     });
     expect(options.allowedTools).toBeUndefined();
+  });
+
+  it('uses step-level provider for session key, not engine-level provider', () => {
+    // Given: step without explicit provider, engine has claude.
+    // Session stored with key "coder" by StepExecutor (which uses runtime?.providerInfo?.provider = undefined).
+    // buildAgentOptions must use the same key to read it back.
+    const step = createStep({
+      name: 'implement',
+      persona: 'coder',
+    });
+    const sessionStore = new Map<string, string>();
+    sessionStore.set('coder', 'stored-session-id');
+
+    const builder = new OptionsBuilder(
+      {
+        projectCwd: '/project',
+        provider: 'claude',
+        providerProfiles: {
+          claude: { defaultPermissionMode: 'full' },
+        },
+      },
+      () => '/project',
+      () => '/project',
+      (persona: string) => sessionStore.get(persona),
+      () => undefined,
+      () => '.takt/runs/sample/reports',
+      () => 'ja',
+      () => [{ name: step.name }],
+      () => 'default',
+      () => 'test workflow',
+    );
+
+    // When: buildAgentOptions without runtime provider
+    const options = builder.buildAgentOptions(step);
+
+    // Then: reads session with key "coder" (matching StepExecutor's store key)
+    expect(options.sessionId).toBe('stored-session-id');
   });
 
   it('keeps merged claude allowedTools for Claude team leader parts when part_allowed_tools is omitted', () => {

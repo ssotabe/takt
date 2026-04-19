@@ -33,6 +33,7 @@ export class OptionsBuilder {
     private readonly getCwd: () => string,
     private readonly getProjectCwd: () => string,
     private readonly getSessionId: (persona: string) => string | undefined,
+    private readonly getStepSessionId: (stepName: string) => string | undefined,
     private readonly getReportDir: () => string,
     private readonly getLanguage: () => Language | undefined,
     private readonly getWorkflowSteps: () => ReadonlyArray<{ name: string; description?: string }>,
@@ -167,7 +168,25 @@ export class OptionsBuilder {
       );
 
     // Skip session resume when cwd !== projectCwd (worktree execution) to avoid cross-directory contamination
-    const shouldResumeSession = step.session !== 'refresh' && this.getCwd() === this.getProjectCwd();
+    const isWorktree = this.getCwd() !== this.getProjectCwd();
+
+    // Resume from another step's session takes priority over persona-based session
+    if (step.resume && !isWorktree) {
+      const resumeSessionId = this.getStepSessionId(step.resume);
+      const supportsStructuredOutput = providerSupportsStructuredOutput(resolvedProvider);
+      const baseOptions = this.buildBaseOptions(step, mergedProviderOptions, runtime);
+      // Force the step's own model to prevent model persistence from the resumed session
+      return {
+        ...baseOptions,
+        sessionId: resumeSessionId,
+        resolvedModel: step.model ?? baseOptions.resolvedModel,
+        allowedTools,
+        mcpServers: resolveMcpServersForProvider(step.mcpServers, resolvedProvider),
+        outputSchema: supportsStructuredOutput === false ? undefined : step.structuredOutput?.schema,
+      };
+    }
+
+    const shouldResumeSession = step.session !== 'refresh' && !isWorktree;
 
     const supportsStructuredOutput = providerSupportsStructuredOutput(resolvedProvider);
 

@@ -153,6 +153,7 @@ function makeState(): WorkflowState {
     stepIterations: new Map(),
     stepOutputs: new Map(),
     personaSessions: new Map(),
+    stepSessions: new Map(),
     userInputs: [],
     lastOutput: {
       persona: 'decomposer',
@@ -244,7 +245,7 @@ describe('ParallelRunner worktree-sync integration', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockMergeChildBranch).toHaveBeenCalledWith(
@@ -298,7 +299,7 @@ describe('ParallelRunner worktree-sync integration', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then: merge should NOT be called, but cleanup still runs
     expect(mockMergeChildBranch).not.toHaveBeenCalled();
@@ -343,7 +344,7 @@ describe('ParallelRunner worktree-sync integration', () => {
     // When / Then: should still cleanup even if merge fails
     // The exact error handling depends on implementation but cleanup must run
     try {
-      await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+      await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
     } catch {
       // merge failure may or may not propagate
     }
@@ -392,7 +393,7 @@ describe('ParallelRunner worktree-sync integration', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockMergeChildBranch).toHaveBeenCalledWith(
@@ -424,7 +425,7 @@ describe('ParallelRunner worktree-sync integration', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockMergeChildBranch).not.toHaveBeenCalled();
@@ -472,7 +473,7 @@ describe('ParallelRunner worktree-sync integration', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockMergeChildBranch).toHaveBeenCalledTimes(2);

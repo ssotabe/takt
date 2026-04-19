@@ -46,6 +46,7 @@ export class StateManager {
       previousResponseSourcePath: undefined,
       userInputs,
       personaSessions,
+      stepSessions: new Map(),
       stepIterations: new Map(),
       status: 'running',
     };

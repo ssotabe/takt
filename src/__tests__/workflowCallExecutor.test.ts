@@ -24,6 +24,7 @@ function makeState(workflowName: string, status: WorkflowState['status'], iterat
     effectResults: new Map(),
     userInputs: [],
     personaSessions: new Map(),
+    stepSessions: new Map(),
     stepIterations: new Map(),
     status,
   };

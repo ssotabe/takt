@@ -27,6 +27,7 @@ interface WorkflowEngineSetupParams {
   config: WorkflowConfig;
   state: {
     personaSessions: Map<string, string>;
+    stepSessions: Map<string, string>;
   };
   task: string;
   projectCwd: string;
@@ -129,6 +130,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     params.getCwd,
     () => params.projectCwd,
     (persona) => params.state.personaSessions.get(persona),
+    (stepName) => params.state.stepSessions.get(stepName),
     params.getReportDir,
     () => params.options.language,
     () => params.config.steps.map((step) => ({ name: step.name, description: step.description })),

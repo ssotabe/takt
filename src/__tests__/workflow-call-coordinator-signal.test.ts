@@ -41,6 +41,7 @@ function makeState(): WorkflowState {
     stepIterations: new Map(),
     stepOutputs: new Map(),
     personaSessions: new Map(),
+    stepSessions: new Map(),
     userInputs: [],
   } as WorkflowState;
 }
@@ -86,6 +87,7 @@ describe('WorkflowEngineStepCoordinator workflowCallRunner interface', () => {
         resolveRuntime: vi.fn().mockReturnValue({ providerInfo: { provider: 'mock', model: 'test' } }),
       },
       updatePersonaSession: vi.fn(),
+      updateStepSession: vi.fn(),
       emitReport: vi.fn(),
     });
 

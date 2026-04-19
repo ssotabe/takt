@@ -68,4 +68,5 @@ export interface ParallelRunContext {
   readonly parentRuleCtx: RuleEvaluatorContext;
   readonly parallelLogger: ParallelLogger | undefined;
   readonly updatePersonaSession: (persona: string, sessionId: string | undefined) => void;
+  readonly updateStepSession: (stepName: string, sessionId: string | undefined) => void;
 }

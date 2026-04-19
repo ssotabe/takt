@@ -121,6 +121,7 @@ function makeState(): WorkflowState {
     stepIterations: new Map(),
     stepOutputs: new Map(),
     personaSessions: new Map(),
+    stepSessions: new Map(),
     userInputs: [],
   } as WorkflowState;
 }
@@ -203,7 +204,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockBuildAbortSignal).toHaveBeenCalledWith(5000, undefined);
@@ -226,7 +227,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockBuildAbortSignal).toHaveBeenCalledWith(120000, undefined);
@@ -246,7 +247,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockBuildAbortSignal).toHaveBeenCalledWith(DEFAULT_PARALLEL_TIMEOUT_MS, undefined);
@@ -272,7 +273,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockBuildAbortSignal).toHaveBeenCalledWith(5000, parentController.signal);
@@ -296,7 +297,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockExecuteAgent).toHaveBeenCalledTimes(1);
@@ -314,7 +315,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
 
     // When / Then
     await expect(
-      runner.runParallelStep(step, state, 'test task', 10, vi.fn()),
+      runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn()),
     ).rejects.toThrow('All parallel sub-steps failed');
 
     expect(mockDispose).toHaveBeenCalledTimes(1);
@@ -335,7 +336,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockBuildAbortSignal).toHaveBeenCalledTimes(2);
@@ -360,7 +361,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
     });
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockBuildAbortSignal).toHaveBeenCalledWith(5000, undefined);
@@ -383,7 +384,7 @@ describe('ParallelRunner buildAbortSignal integration', () => {
 
     // When / Then
     await expect(
-      new ParallelRunner(deps).runParallelStep(step, state, 'test task', 10, vi.fn()),
+      new ParallelRunner(deps).runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn()),
     ).rejects.toThrow('workflow_call sub-step "child-call" requires workflowCallRunner');
   });
 });

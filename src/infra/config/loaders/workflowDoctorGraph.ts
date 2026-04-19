@@ -9,6 +9,8 @@ type DoctorGraphRule = {
 
 type DoctorGraphStep = {
   name: string;
+  resume?: string;
+  session?: string;
   parallel?: DoctorGraphStep[];
   rules?: DoctorGraphRule[];
 };
@@ -91,6 +93,8 @@ function createDoctorGraph(raw: RawWorkflow): DoctorGraph {
     })),
     steps: raw.steps.map((step) => ({
       name: step.name,
+      resume: step.resume,
+      session: step.session,
       parallel: step.parallel?.map((substep) => ({
         name: substep.name,
         rules: substep.rules?.map((rule) => ({ next: rule.next })),
@@ -133,6 +137,26 @@ export function validateDoctorGraph(
         diagnostics.push({
           level: 'error',
           message: `Step "${step.name}/${sub.name}" routes to unknown next step "${rule.next}"`,
+        });
+      }
+    }
+
+    if (step.resume) {
+      if (step.resume === step.name) {
+        diagnostics.push({
+          level: 'error',
+          message: `Step "${step.name}" has resume referencing itself`,
+        });
+      } else if (!stepNames.has(step.resume)) {
+        diagnostics.push({
+          level: 'error',
+          message: `Step "${step.name}" has resume referencing unknown step "${step.resume}"`,
+        });
+      }
+      if (step.session === 'refresh') {
+        diagnostics.push({
+          level: 'error',
+          message: `Step "${step.name}" has both resume and session: "refresh" which are mutually exclusive`,
         });
       }
     }

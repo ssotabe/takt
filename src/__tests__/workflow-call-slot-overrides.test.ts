@@ -67,6 +67,7 @@ function makeState(): WorkflowState {
     stepIterations: new Map(),
     stepOutputs: new Map(),
     personaSessions: new Map(),
+    stepSessions: new Map(),
     userInputs: [],
   } as WorkflowState;
 }

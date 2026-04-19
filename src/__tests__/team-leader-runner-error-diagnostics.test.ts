@@ -114,6 +114,7 @@ function makeState(): WorkflowState {
     previousResponseSourcePath: undefined,
     userInputs: [],
     personaSessions: new Map(),
+    stepSessions: new Map(),
     stepIterations: new Map(),
     status: 'running',
   } as WorkflowState;

@@ -225,6 +225,7 @@ function createWorkflowStepRawSchema(options?: { relaxWorkflowCallConditions?: b
   call: z.string().min(1).optional(),
   overrides: WorkflowCallOverridesRawSchema.optional(),
   args: WorkflowCallArgsRawSchema.optional(),
+  resume: z.string().optional(),
   session: z.enum(['continue', 'refresh']).optional(),
   persona: z.string().optional(),
   persona_name: z.string().optional(),

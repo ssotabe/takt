@@ -46,6 +46,7 @@ export class ParallelRunner {
     task: string,
     maxSteps: number,
     updatePersonaSession: (persona: string, sessionId: string | undefined) => void,
+    updateStepSession: (stepName: string, sessionId: string | undefined) => void,
   ): Promise<{ response: AgentResponse; instruction: string }> {
     if (!step.parallel) {
       throw new Error(`Step "${step.name}" has no parallel sub-steps`);
@@ -64,7 +65,7 @@ export class ParallelRunner {
 
     const parentPm = this.deps.optionsBuilder.resolveStepProviderModel(step);
     const ctx: ParallelRunContext = {
-      step, state, task, maxSteps, stepIteration, parallelLogger, updatePersonaSession,
+      step, state, task, maxSteps, stepIteration, parallelLogger, updatePersonaSession, updateStepSession,
       parentRuleCtx: {
         state,
         cwd: this.deps.getCwd(),
@@ -145,6 +146,7 @@ export class ParallelRunner {
         throw new Error(`Missing prompt parts for phase start: ${subStep.name}:1`);
       }
       ctx.updatePersonaSession(subSessionKey, subResponse.sessionId);
+      ctx.updateStepSession(subStep.name, subResponse.sessionId);
       this.deps.onPhaseComplete?.(subStep, 1, 'execute', subResponse.content, subResponse.status, subResponse.error, undefined, parentIteration);
 
       const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(

@@ -79,6 +79,7 @@ function makeState(lastOutputContent: string): WorkflowState {
     },
     userInputs: [],
     personaSessions: new Map(),
+    stepSessions: new Map(),
     stepIterations: new Map(),
     status: 'running',
   };
@@ -254,6 +255,7 @@ describe('prepareSlotContext', () => {
         lastOutput: undefined,
         userInputs: [],
         personaSessions: new Map(),
+        stepSessions: new Map(),
         stepIterations: new Map(),
         status: 'running',
       };

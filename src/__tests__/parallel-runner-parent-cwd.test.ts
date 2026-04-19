@@ -136,6 +136,7 @@ function makeState(): WorkflowState {
     stepIterations: new Map(),
     stepOutputs: new Map(),
     personaSessions: new Map(),
+    stepSessions: new Map(),
     userInputs: [],
     lastOutput: {
       persona: 'decomposer',
@@ -224,7 +225,7 @@ describe('ParallelRunner parent cwd (Feature C)', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test task', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test task', 10, vi.fn(), vi.fn());
 
     // Then: prepareSlotContext should receive getCwd() value, not projectCwd
     expect(mockPrepareSlotContext).toHaveBeenCalledWith(
@@ -270,7 +271,7 @@ describe('ParallelRunner parent cwd (Feature C)', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockMergeChildBranch).toHaveBeenCalledWith(
@@ -308,7 +309,7 @@ describe('ParallelRunner parent cwd (Feature C)', () => {
     const runner = new ParallelRunner(deps);
 
     // When
-    await runner.runParallelStep(step, state, 'test', 10, vi.fn());
+    await runner.runParallelStep(step, state, 'test', 10, vi.fn(), vi.fn());
 
     // Then
     expect(mockCleanupParallelWorktree).toHaveBeenCalledWith(
