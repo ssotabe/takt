@@ -64,6 +64,19 @@ export interface StreamRateLimitEventData {
   isUsingOverage?: boolean;
 }
 
+export interface StreamApiRetryEventData {
+  retryDelayMs: number;
+  errorStatus: number;
+  attempt: number;
+  maxRetries: number;
+}
+
+export interface StreamRetryEventData {
+  attempt: number;
+  maxRetries: number;
+  strategy: 'resume' | 'new_session';
+}
+
 export type StreamEvent =
   | { type: 'init'; data: StreamInitEventData }
   | { type: 'tool_use'; data: StreamToolUseEventData }
@@ -74,6 +87,8 @@ export type StreamEvent =
   | { type: 'result'; data: StreamResultEventData }
   | { type: 'assistant_error'; data: StreamAssistantErrorEventData }
   | { type: 'rate_limit'; data: StreamRateLimitEventData }
+  | { type: 'api_retry'; data: StreamApiRetryEventData }
+  | { type: 'retry'; data: StreamRetryEventData }
   | { type: 'error'; data: StreamErrorEventData };
 
 export type StreamCallback = (event: StreamEvent) => void;

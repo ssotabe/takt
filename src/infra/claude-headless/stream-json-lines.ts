@@ -124,6 +124,29 @@ function extractStreamingThinkingFromEvent(parsed: unknown): string | undefined 
   return undefined;
 }
 
+export function tryExtractApiRetryFromStreamJsonLine(
+  line: string,
+): { retryDelayMs: number; errorStatus: number; attempt: number; maxRetries: number } | undefined {
+  const parsed = parseStreamJsonLine(line);
+  if (!parsed) {
+    return undefined;
+  }
+  const root = toRecord(parsed);
+  if (!root || root.type !== 'system' || root.subtype !== 'api_retry') {
+    return undefined;
+  }
+  const data = toRecord(root.data);
+  if (!data) {
+    return undefined;
+  }
+  return {
+    retryDelayMs: data.retryDelayMs as number,
+    errorStatus: data.errorStatus as number,
+    attempt: data.attempt as number,
+    maxRetries: data.maxRetries as number,
+  };
+}
+
 export function tryExtractTextFromStreamJsonLine(line: string): string | undefined {
   const parsed = parseStreamJsonLine(line);
   return parsed ? extractStreamingTextFromEvent(parsed) : undefined;

@@ -1,5 +1,9 @@
 import { crossSpawn } from '../../shared/utils/index.js';
-import { tryExtractTextFromStreamJsonLine, tryExtractThinkingFromStreamJsonLine } from './stream-json-lines.js';
+import {
+  tryExtractApiRetryFromStreamJsonLine,
+  tryExtractTextFromStreamJsonLine,
+  tryExtractThinkingFromStreamJsonLine,
+} from './stream-json-lines.js';
 import type { ClaudeHeadlessCallOptions } from './types.js';
 
 const HEADLESS_STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -12,6 +16,7 @@ function buildHeadlessEnv(options: ClaudeHeadlessCallOptions): NodeJS.ProcessEnv
   if (options.anthropicApiKey) {
     env.ANTHROPIC_API_KEY = options.anthropicApiKey;
   }
+  env.CLAUDE_CODE_UNATTENDED_RETRY = 'true';
   return env;
 }
 
@@ -163,6 +168,11 @@ export function runHeadlessCli(
       if (!options.onStream) return;
 
       for (const line of parts) {
+        const apiRetry = tryExtractApiRetryFromStreamJsonLine(line);
+        if (apiRetry) {
+          options.onStream({ type: 'api_retry', data: apiRetry });
+          continue;
+        }
         const thinking = tryExtractThinkingFromStreamJsonLine(line);
         if (thinking) {
           options.onStream({ type: 'thinking', data: { thinking } });

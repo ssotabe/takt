@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -1192,5 +1192,319 @@ describe('callClaudeHeadless', () => {
     const effortIdx = argv.indexOf('--effort');
     expect(effortIdx).toBeGreaterThanOrEqual(0);
     expect(argv[effortIdx + 1]).toBe('low');
+  });
+
+  describe('retry behavior', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function stubSpawnOnce(opts: {
+      stdoutChunks?: string[];
+      stderrChunks?: string[];
+      closeCode?: number | null;
+      closeSignal?: NodeJS.Signals | null;
+      error?: NodeJS.ErrnoException;
+    }): void {
+      vi.mocked(spawn).mockImplementationOnce((_cmd, _args, spawnOptions) => {
+        lastArgv = [...(_args as string[])];
+        lastSpawnEnv = spawnOptions?.env as NodeJS.ProcessEnv | undefined;
+        const stdout = new EventEmitter();
+        const stderr = new EventEmitter();
+        const proc = new EventEmitter() as EventEmitter & Partial<ChildProcess>;
+        proc.stdout = stdout as NodeJS.ReadableStream;
+        proc.stderr = stderr as NodeJS.ReadableStream;
+        proc.kill = vi.fn() as unknown as ChildProcess['kill'];
+
+        queueMicrotask(() => {
+          if (opts.error) {
+            proc.emit('error', opts.error);
+            return;
+          }
+          for (const c of opts.stdoutChunks ?? []) {
+            stdout.emit('data', Buffer.from(c, 'utf-8'));
+          }
+          for (const c of opts.stderrChunks ?? []) {
+            stderr.emit('data', Buffer.from(c, 'utf-8'));
+          }
+          const code = opts.closeCode === undefined ? 0 : opts.closeCode;
+          proc.emit('close', code, opts.closeSignal ?? null);
+        });
+
+        return proc as ChildProcess;
+      });
+    }
+
+    function spawnCallArgs(callIndex: number): string[] {
+      const call = vi.mocked(spawn).mock.calls[callIndex];
+      return [...(call![1] as string[])];
+    }
+
+    it('retries up to 3 times on a retryable error and succeeds on the third attempt', async () => {
+      // Attempt 1: fail with exit code 1
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      // Attempt 2: fail with exit code 1
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      // Attempt 3: succeed
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+        closeCode: 0,
+      });
+
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp' });
+      // Advance timers to allow retry delays to complete
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('done');
+      expect(res.content).toBe('ok');
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not retry on ENOENT error', async () => {
+      const err = Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' as const });
+      stubSpawnOnce({ error: err });
+
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp' });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('error');
+      expect(res.error).toMatch(/claude CLI not found/i);
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry on MAXBUFFER error', async () => {
+      const err = Object.assign(new Error('stdout exceeded buffer'), {
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' as const,
+      });
+      stubSpawnOnce({ error: err });
+
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp' });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('error');
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry when abortSignal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'x' })}\n`],
+        closeCode: 1,
+      });
+
+      const promise = callClaudeHeadless('agent', 'hi', {
+        cwd: '/tmp',
+        abortSignal: controller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('error');
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    });
+
+    it('resumes with --resume when sessionId is extracted from failed stdout', async () => {
+      const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      // Attempt 1: fail but emit a system event with session_id
+      stubSpawnOnce({
+        stdoutChunks: [
+          `${JSON.stringify({ type: 'system', session_id: sessionId })}\n`,
+          `${JSON.stringify({ type: 'text', text: 'partial' })}\n`,
+        ],
+        closeCode: 1,
+      });
+      // Attempt 2: succeed
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'resumed' })}\n`],
+        closeCode: 0,
+      });
+
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp' });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('done');
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(2);
+
+      // Verify second call uses --resume with the extracted sessionId
+      const secondCallArgs = spawnCallArgs(1);
+      const resumeIdx = secondCallArgs.indexOf('--resume');
+      expect(resumeIdx).toBeGreaterThanOrEqual(0);
+      expect(secondCallArgs[resumeIdx + 1]).toBe(sessionId);
+    });
+
+    it('falls back to a new session when sessionId cannot be extracted from failed stdout', async () => {
+      // Attempt 1: fail without any session_id in stdout
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      // Attempt 2: succeed
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+        closeCode: 0,
+      });
+
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp' });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('done');
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(2);
+
+      // Verify second call uses --session-id (new session), not --resume
+      const secondCallArgs = spawnCallArgs(1);
+      expect(secondCallArgs).toContain('--session-id');
+      expect(secondCallArgs).not.toContain('--resume');
+    });
+
+    it('emits retry event via onStream when retrying', async () => {
+      // Attempt 1: fail
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      // Attempt 2: succeed
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+        closeCode: 0,
+      });
+
+      const onStream = vi.fn();
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp', onStream });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await promise;
+      const retryEvents = onStream.mock.calls
+        .map((call) => call[0])
+        .filter((event: { type: string }) => event.type === 'retry');
+      expect(retryEvents).toHaveLength(1);
+      expect(retryEvents[0]).toEqual(
+        expect.objectContaining({
+          type: 'retry',
+          data: expect.objectContaining({
+            attempt: expect.any(Number),
+            maxRetries: expect.any(Number),
+            strategy: expect.any(String),
+          }),
+        }),
+      );
+    });
+
+    it('returns error after exhausting all retry attempts', async () => {
+      // All 3 attempts fail
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp' });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('error');
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(3);
+    });
+
+    it('emits retry event with strategy "resume" when sessionId is available', async () => {
+      const sessionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      stubSpawnOnce({
+        stdoutChunks: [
+          `${JSON.stringify({ type: 'system', session_id: sessionId })}\n`,
+          `${JSON.stringify({ type: 'text', text: 'partial' })}\n`,
+        ],
+        closeCode: 1,
+      });
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+        closeCode: 0,
+      });
+
+      const onStream = vi.fn();
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp', onStream });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await promise;
+      const retryEvents = onStream.mock.calls
+        .map((call) => call[0])
+        .filter((event: { type: string }) => event.type === 'retry');
+      expect(retryEvents).toHaveLength(1);
+      expect(retryEvents[0].data.strategy).toBe('resume');
+    });
+
+    it('emits retry event with strategy "new_session" when sessionId is not available', async () => {
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+        closeCode: 0,
+      });
+
+      const onStream = vi.fn();
+      const promise = callClaudeHeadless('agent', 'hi', { cwd: '/tmp', onStream });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await promise;
+      const retryEvents = onStream.mock.calls
+        .map((call) => call[0])
+        .filter((event: { type: string }) => event.type === 'retry');
+      expect(retryEvents).toHaveLength(1);
+      expect(retryEvents[0].data.strategy).toBe('new_session');
+    });
+
+    it('returns error response when abort signal fires during retry delay', async () => {
+      const controller = new AbortController();
+
+      // Attempt 1: fail with retryable error
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'text', text: 'partial' })}\n`],
+        closeCode: 1,
+      });
+      // Attempt 2: should not be reached
+      stubSpawnOnce({
+        stdoutChunks: [`${JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' })}\n`],
+        closeCode: 0,
+      });
+
+      const promise = callClaudeHeadless('agent', 'hi', {
+        cwd: '/tmp',
+        abortSignal: controller.signal,
+      });
+
+      // Let first attempt run, then abort during the retry delay
+      await vi.advanceTimersByTimeAsync(100);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const res = await promise;
+      expect(res.status).toBe('error');
+      // Should only have spawned once — the abort during delay prevents second attempt
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    });
   });
 });

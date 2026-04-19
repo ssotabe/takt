@@ -2,6 +2,7 @@ import type { AgentResponse } from '../../core/models/index.js';
 import type { StreamCallback } from '../../shared/types/provider.js';
 import { parseStructuredOutput } from '../../shared/utils/index.js';
 import type { StreamJsonStdoutResult } from './stream-json-lines.js';
+import type { ClaudeHeadlessCallOptions } from './types.js';
 
 type ClaudeHeadlessResponseInput = {
   agentName: string;
@@ -34,6 +35,27 @@ function emitResultEvent(
     type: 'result',
     data: payload,
   });
+}
+
+export function buildErrorResponse(
+  agentName: string,
+  message: string,
+  options: ClaudeHeadlessCallOptions,
+): AgentResponse {
+  emitResultEvent(options.onStream, {
+    result: '',
+    success: false,
+    error: message,
+    sessionId: options.sessionId ?? '',
+  });
+  return {
+    persona: agentName,
+    status: 'error',
+    content: message,
+    timestamp: new Date(),
+    sessionId: options.sessionId,
+    error: message,
+  };
 }
 
 export function buildClaudeHeadlessResponse(input: ClaudeHeadlessResponseInput): AgentResponse {

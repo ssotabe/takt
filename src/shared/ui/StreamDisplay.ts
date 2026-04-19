@@ -277,6 +277,14 @@ export class StreamDisplay {
         case 'result':
           this.showResult(event.data.success, event.data.error);
           break;
+        case 'api_retry':
+          this.flush();
+          console.log(chalk.yellow(`[${this.agentName}] API rate limit retry (attempt ${event.data.attempt}/${event.data.maxRetries}, delay ${event.data.retryDelayMs}ms)`));
+          break;
+        case 'retry':
+          this.reset();
+          console.log(chalk.yellow(`[${this.agentName}] Retrying (attempt ${event.data.attempt}/${event.data.maxRetries}, strategy: ${event.data.strategy})`));
+          break;
         case 'assistant_error':
         case 'rate_limit':
         case 'error':

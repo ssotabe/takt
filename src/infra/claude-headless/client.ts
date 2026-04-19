@@ -17,7 +17,8 @@ import {
   aggregateResultFromStdout,
   extractSessionIdFromStdout,
 } from './stream-json-lines.js';
-import { buildClaudeHeadlessResponse } from './result-response.js';
+import { buildClaudeHeadlessResponse, buildErrorResponse } from './result-response.js';
+import { isRetryableError, waitForRetryDelay, HEADLESS_MAX_RETRIES } from './retry.js';
 import type { ClaudeHeadlessCallOptions } from './types.js';
 
 const log = createLogger('claude-headless');
@@ -188,58 +189,88 @@ export async function callClaudeHeadless(
   prompt: string,
   options: ClaudeHeadlessCallOptions,
 ): Promise<AgentResponse> {
-  let cleanup: (() => Promise<void>) | undefined;
-  let response: AgentResponse;
+  let response: AgentResponse | undefined;
+  let retryOptions = options;
 
-  try {
-    const prepared = await buildSpawnArgs(prompt, options);
-    cleanup = prepared.cleanup;
-    const { args, expectedSessionId } = prepared;
-    const { stdout, stderr } = await runHeadlessCli(args, options);
-    const parsed = aggregateResultFromStdout(stdout);
-    const sessionId = extractSessionIdFromStdout(stdout) ?? expectedSessionId;
-    response = buildClaudeHeadlessResponse({
-      agentName,
-      parsed,
-      stdout,
-      stderr,
-      sessionId,
-      outputSchema: options.outputSchema,
-      onStream: options.onStream,
-    });
-  } catch (raw) {
-    const error = raw as ExecError;
-    const message = classifyError(error, options);
-    if (options.onStream) {
-      options.onStream({
-        type: 'result',
-        data: {
-          result: '',
-          success: false,
-          error: message,
-          sessionId: options.sessionId ?? '',
-        },
-      });
+  for (let attempt = 0; attempt <= HEADLESS_MAX_RETRIES; attempt++) {
+    let prepared: Awaited<ReturnType<typeof buildSpawnArgs>>;
+    try {
+      prepared = await buildSpawnArgs(prompt, retryOptions);
+    } catch (raw) {
+      response = buildErrorResponse(agentName, getErrorMessage(raw as Error), options);
+      break;
     }
-    response = {
-      persona: agentName,
-      status: 'error',
-      content: message,
-      timestamp: new Date(),
-      sessionId: options.sessionId,
-      error: message,
-    };
+
+    const { cleanup } = prepared;
+
+    try {
+      const { args, expectedSessionId } = prepared;
+      const { stdout, stderr } = await runHeadlessCli(args, retryOptions);
+      const parsed = aggregateResultFromStdout(stdout);
+      const sessionId = extractSessionIdFromStdout(stdout) ?? expectedSessionId;
+      response = buildClaudeHeadlessResponse({
+        agentName,
+        parsed,
+        stdout,
+        stderr,
+        sessionId,
+        outputSchema: options.outputSchema,
+        onStream: options.onStream,
+      });
+
+      try {
+        await cleanup();
+      } catch (raw) {
+        log.error('Failed to clean up Claude MCP config', {
+          agentName,
+          error: getErrorMessage(raw as Error),
+        });
+      }
+
+      break;
+    } catch (raw) {
+      const error = raw as ExecError;
+
+      try {
+        await cleanup();
+      } catch (cleanupRaw) {
+        log.error('Failed to clean up Claude MCP config', {
+          agentName,
+          error: getErrorMessage(cleanupRaw as Error),
+        });
+      }
+
+      if (!isRetryableError(error, options.abortSignal) || attempt >= HEADLESS_MAX_RETRIES) {
+        response = buildErrorResponse(agentName, classifyError(error, options), options);
+        break;
+      }
+
+      const extractedSessionId = extractSessionIdFromStdout(error.stdout ?? '');
+      const strategy: 'resume' | 'new_session' = extractedSessionId ? 'resume' : 'new_session';
+      retryOptions = extractedSessionId
+        ? { ...options, sessionId: extractedSessionId }
+        : { ...options, sessionId: undefined };
+
+      if (options.onStream) {
+        options.onStream({
+          type: 'retry',
+          data: { attempt: attempt + 1, maxRetries: HEADLESS_MAX_RETRIES, strategy },
+        });
+      }
+
+      if (options.abortSignal?.aborted) {
+        response = buildErrorResponse(agentName, classifyError(error, options), options);
+        break;
+      }
+
+      try {
+        await waitForRetryDelay(attempt + 1, options.abortSignal);
+      } catch {
+        response = buildErrorResponse(agentName, classifyError(error, options), options);
+        break;
+      }
+    }
   }
 
-  try {
-    await cleanup?.();
-  } catch (raw) {
-    const cleanupError = raw as Error;
-    log.error('Failed to clean up Claude MCP config', {
-      agentName,
-      error: getErrorMessage(cleanupError),
-    });
-  }
-
-  return response;
+  return response!;
 }

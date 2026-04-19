@@ -74,6 +74,19 @@ export interface RateLimitEventData {
   isUsingOverage?: boolean;
 }
 
+export interface ApiRetryEventData {
+  retryDelayMs: number;
+  errorStatus: number;
+  attempt: number;
+  maxRetries: number;
+}
+
+export interface RetryEventData {
+  attempt: number;
+  maxRetries: number;
+  strategy: 'resume' | 'new_session';
+}
+
 /** Stream event (discriminated union) */
 export type StreamEvent =
   | { type: 'init'; data: InitEventData }
@@ -85,6 +98,8 @@ export type StreamEvent =
   | { type: 'result'; data: ResultEventData }
   | { type: 'assistant_error'; data: AssistantErrorEventData }
   | { type: 'rate_limit'; data: RateLimitEventData }
+  | { type: 'api_retry'; data: ApiRetryEventData }
+  | { type: 'retry'; data: RetryEventData }
   | { type: 'error'; data: ErrorEventData };
 
 /** Callback for streaming events */
