@@ -1,0 +1,177 @@
+name: roadmap
+description: Roadmap execution workflow (task decomposition → 2-parallel workflow_call → batch loop)
+max_steps: 200
+initial_step: decompose
+personas:
+  decomposition-dependency-reviewer: ../facets/personas/decomposition-dependency-reviewer.md
+  decomposition-granularity-reviewer: ../facets/personas/decomposition-granularity-reviewer.md
+  decomposition-coverage-reviewer: ../facets/personas/decomposition-coverage-reviewer.md
+steps:
+  - name: decompose
+    persona: planner
+    edit: false
+    instruction: |
+      Analyze the user's roadmap ({task}) and decompose it into independently executable tasks.
+
+      **Steps:**
+      1. If {report:roadmap-tasks.md} exists, read it to check completed tasks and retry counts
+      2. If previous_response contains review feedback (rejection from review_decomposition):
+         - Revise the task decomposition based on the feedback
+         - Increment the "review rejection count" in roadmap-tasks.md
+         - If review rejection count exceeds 3, transition to "Requirements unclear" (ABORT)
+      3. Normal flow: identify independently executable tasks from the roadmap
+
+      **Output format:**
+      Output the task plan (slot assignment is not needed).
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: Decomposition complete
+        next: review_decomposition
+      - condition: No tasks
+        next: COMPLETE
+      - condition: Requirements unclear
+        next: ABORT
+  - name: review_decomposition
+    parallel:
+      - name: dependency-review
+        persona: decomposition-dependency-reviewer
+        edit: false
+        instruction: |
+          Review the task decomposition from previous_response for dependency and execution order issues.
+
+          **Review criteria:**
+          - Are there implicit dependencies between tasks that have been overlooked?
+          - Is the execution order consistent with the dependencies?
+          - Are parallelizable tasks unnecessarily serialized?
+
+          If no issues found, respond with approved. If issues found, respond with needs_fix (specify concrete problems and suggested fixes).
+        rules:
+          - condition: approved
+          - condition: needs_fix
+      - name: granularity-review
+        persona: decomposition-granularity-reviewer
+        edit: false
+        instruction: |
+          Review the task decomposition from previous_response for granularity and scope issues.
+
+          **Review criteria:**
+          - Are any tasks too large to complete in a single execution?
+          - Are any tasks unnecessarily small or over-decomposed?
+          - Is the scope of each task clearly defined?
+
+          If no issues found, respond with approved. If issues found, respond with needs_fix (specify concrete problems and suggested fixes).
+        rules:
+          - condition: approved
+          - condition: needs_fix
+      - name: coverage-review
+        persona: decomposition-coverage-reviewer
+        edit: false
+        instruction: |
+          Review the task decomposition from previous_response for requirements coverage.
+
+          **Review criteria:**
+          - Are all requirements from the original roadmap covered by the decomposed tasks?
+          - Are there any missing requirements or features?
+          - Are there any extra tasks not in the original requirements?
+
+          If no issues found, respond with approved. If issues found, respond with needs_fix (specify concrete problems and suggested fixes).
+        rules:
+          - condition: approved
+          - condition: needs_fix
+    rules:
+      - condition: all("approved")
+        next: assign_slots
+      - condition: any("needs_fix")
+        next: decompose
+  - name: assign_slots
+    persona: planner
+    edit: false
+    instruction: |
+      Read {report:roadmap-tasks.md} and assign the next tasks to execute into slots.
+
+      **Steps:**
+      1. Read roadmap-tasks.md to check the full task list, statuses, and retry counts
+      2. If previous_response contains a `## Slot Results` section (post-batch execution flow):
+         - Identify tasks from failed (ABORT/ERROR) slots
+         - Reassign tasks whose retry count is below the limit (2)
+         - Skip tasks that have reached the retry limit and update their status to "Retry limit reached" in roadmap-tasks.md
+      3. Select up to 2 incomplete tasks and assign to slot_1 / slot_2
+         - If tasks have dependencies, only select tasks whose dependencies are already completed
+      4. If no tasks are available for assignment, transition to "No tasks"
+      5. If fewer than 2 tasks, mark unused slots as "No task"
+
+      **Output format:**
+      Each slot's task instructions must contain sufficient information for the child workflow to execute independently:
+      - Background and purpose
+      - Implementation details
+      - Constraints and notes
+      - Verification method
+
+      ## slot_1
+      (Task instructions)
+
+      ## slot_2
+      (Task instructions or No task)
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: Execute batch
+        next: execute_batch
+      - condition: No tasks
+        next: COMPLETE
+  - name: execute_batch
+    parallel_config:
+      timeout_ms: 7200000
+    parallel:
+      - name: slot_1
+        kind: workflow_call
+        call: default-perf
+        rules:
+          - condition: COMPLETE
+          - condition: ABORT
+      - name: slot_2
+        kind: workflow_call
+        call: default-perf
+        rules:
+          - condition: COMPLETE
+          - condition: ABORT
+    rules:
+      - condition: all("COMPLETE")
+        next: check_remaining
+      - condition: any("ABORT")
+        next: check_remaining
+  - name: check_remaining
+    persona: planner
+    edit: false
+    instruction: |
+      Check the results of the previous batch execution and determine if there are failed slots or remaining tasks.
+
+      **Steps:**
+      1. Read {report:roadmap-tasks.md} to check the full task list and retry counts
+      2. Check previous_response `## Slot Results` section for each slot's result
+         - COMPLETE: Success (processed)
+         - ABORT / ERROR: Failure (retry candidate)
+      3. If there are failed slots, check the retry count in roadmap-tasks.md
+         - Retry count below limit (2) → determine "Failed slots exist"
+         - All failed slots at retry limit (2) → determine "Retry limit reached"
+      4. If no failed slots and there are remaining unexecuted tasks → determine "Remaining tasks exist"
+      5. If all tasks completed (successful + no remaining) → determine "All tasks complete"
+      6. Update retry counts in roadmap-tasks.md
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: Failed slots exist
+        next: assign_slots
+      - condition: Remaining tasks exist
+        next: assign_slots
+      - condition: All tasks complete
+        next: COMPLETE
+      - condition: Retry limit reached
+        next: ABORT

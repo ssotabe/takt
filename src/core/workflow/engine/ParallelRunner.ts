@@ -13,7 +13,7 @@ import type {
   AgentResponse,
 } from '../../models/types.js';
 import { executeAgent } from '../../../agents/agent-usecases.js';
-import { ParallelLogger } from './parallel-logger.js';
+import { ParallelLogger, buildParallelLoggerOptions } from './parallel-logger.js';
 import { needsStatusJudgmentPhase, runReportPhase, runStatusJudgmentPhase } from '../phase-runner.js';
 import { detectMatchedRule } from '../evaluation/index.js';
 import type { StatusJudgmentPhaseResult } from '../phase-runner.js';
@@ -21,77 +21,15 @@ import { incrementStepIteration } from './state-manager.js';
 import { createLogger, getErrorMessage, Semaphore } from '../../../shared/utils/index.js';
 import { buildSessionKey } from '../session-key.js';
 import { buildAbortSignal } from './abort-signal.js';
-import { prepareSlotContext, type WorkflowCallSlotOverrides } from './slot-context.js';
-import { mergeChildBranch } from './worktree-sync.js';
-import { cleanupParallelWorktree } from './parallel-worktree.js';
+import { prepareSlotContext } from './slot-context.js';
+import { runWorkflowCallSubStep } from './parallel-workflow-call-runner.js';
 import { DEFAULT_PARALLEL_TIMEOUT_MS } from '../../models/workflow-defaults.js';
-import type { OptionsBuilder } from './OptionsBuilder.js';
-import type { StepExecutor } from './StepExecutor.js';
-import type { WorkflowEngineOptions, RuntimeStepResolution, PhaseName, PhasePromptParts, JudgeStageEntry } from '../types.js';
-import type { ParallelLoggerOptions } from './parallel-logger.js';
-import type { StructuredCaller } from '../../../agents/structured-caller.js';
-import type { RuleEvaluatorContext } from '../evaluation/RuleEvaluator.js';
+import type { PhasePromptParts } from '../types.js';
+import type { ParallelRunnerDeps, ParallelRunContext } from './parallel-runner-types.js';
+
+export type { ParallelRunnerDeps } from './parallel-runner-types.js';
 
 const log = createLogger('parallel-runner');
-
-export interface ParallelRunnerDeps {
-  readonly optionsBuilder: OptionsBuilder;
-  readonly stepExecutor: StepExecutor;
-  readonly engineOptions: WorkflowEngineOptions;
-  readonly getCwd: () => string;
-  readonly getReportDir: () => string;
-  readonly getInteractive: () => boolean;
-  readonly detectRuleIndex: (content: string, stepName: string) => number;
-  readonly structuredCaller: StructuredCaller;
-  readonly workflowCallRunner?: {
-    run: (
-      step: WorkflowStep & { call: string },
-      runtime?: RuntimeStepResolution,
-      slotOverrides?: WorkflowCallSlotOverrides,
-      abortSignal?: AbortSignal,
-    ) => Promise<{ response: AgentResponse; instruction: string }>;
-  };
-  readonly getRunSlug?: () => string;
-  readonly onPhaseStart?: (
-    step: WorkflowStep,
-    phase: 1 | 2 | 3,
-    phaseName: PhaseName,
-    instruction: string,
-    promptParts: PhasePromptParts,
-    phaseExecutionId?: string,
-    iteration?: number,
-  ) => void;
-  readonly onPhaseComplete?: (
-    step: WorkflowStep,
-    phase: 1 | 2 | 3,
-    phaseName: PhaseName,
-    content: string,
-    status: string,
-    error?: string,
-    phaseExecutionId?: string,
-    iteration?: number,
-  ) => void;
-  readonly onJudgeStage?: (
-    step: WorkflowStep,
-    phase: 3,
-    phaseName: 'judge',
-    entry: JudgeStageEntry,
-    phaseExecutionId?: string,
-    iteration?: number,
-  ) => void;
-}
-
-/** Context shared across sub-step executions within a single parallel step run */
-interface ParallelRunContext {
-  readonly step: WorkflowStep;
-  readonly state: WorkflowState;
-  readonly task: string;
-  readonly maxSteps: number;
-  readonly stepIteration: number;
-  readonly parentRuleCtx: RuleEvaluatorContext;
-  readonly parallelLogger: ParallelLogger | undefined;
-  readonly updatePersonaSession: (persona: string, sessionId: string | undefined) => void;
-}
 
 export class ParallelRunner {
   constructor(
@@ -157,7 +95,7 @@ export class ParallelRunner {
         }
         try {
           if (subStep.kind === 'workflow_call') {
-            return await this.runWorkflowCallSubStep(subStep, step, state, slotContext, cwd);
+            return await this.runWorkflowCallSubStepDelegate(subStep, step, state, slotContext, cwd);
           }
           return await this.runAgentSubStep(subStep, index, ctx);
         } finally {
@@ -249,61 +187,24 @@ export class ParallelRunner {
     }
   }
 
-  private async runWorkflowCallSubStep(
+  private async runWorkflowCallSubStepDelegate(
     subStep: WorkflowCallStep,
     parentStep: WorkflowStep,
     state: WorkflowState,
     slotContext: ReturnType<typeof prepareSlotContext>,
     cwd: string,
   ): Promise<{ subStep: WorkflowStep; response: AgentResponse; instruction: string }> {
-    const slotOverrides = slotContext?.overrides.get(subStep.name);
-    const worktreeInfo = slotContext?.worktrees.get(subStep.name);
-
-    if (slotContext && !slotOverrides) {
-      const skipResponse: AgentResponse = {
-        persona: subStep.name,
-        status: 'done',
-        content: '',
-        timestamp: new Date(),
-      };
-      state.stepOutputs.set(subStep.name, skipResponse);
-      return { subStep, response: skipResponse, instruction: '' };
-    }
-
     if (!this.deps.workflowCallRunner) {
       throw new Error(`workflow_call sub-step "${subStep.name}" requires workflowCallRunner`);
     }
-
-    const timeoutMs = subStep.timeoutMs ?? parentStep.parallelConfig?.timeoutMs ?? DEFAULT_PARALLEL_TIMEOUT_MS;
-    const { signal, dispose } = buildAbortSignal(timeoutMs, this.deps.engineOptions.abortSignal);
-
-    let callResult: { response: AgentResponse; instruction: string } | undefined;
-    try {
-      callResult = await this.deps.workflowCallRunner.run(
-        subStep,
-        undefined,
-        slotOverrides,
-        signal,
-      );
-      state.stepOutputs.set(subStep.name, callResult.response);
-      this.deps.stepExecutor.emitStepReports(subStep);
-      return { subStep, response: callResult.response, instruction: callResult.instruction };
-    } finally {
-      if (worktreeInfo) {
-        try {
-          if (callResult) {
-            const matchedCondition = subStep.rules?.[callResult.response.matchedRuleIndex ?? -1]?.condition;
-            const shouldMerge = matchedCondition !== 'ABORT';
-            if (shouldMerge) {
-              await mergeChildBranch(worktreeInfo.path, cwd, slotOverrides?.initialPreviousResponse?.content);
-            }
-          }
-        } finally {
-          await cleanupParallelWorktree(worktreeInfo.path, cwd);
-        }
-      }
-      dispose();
-    }
+    return runWorkflowCallSubStep(
+      {
+        workflowCallRunner: this.deps.workflowCallRunner,
+        emitStepReports: (step) => this.deps.stepExecutor.emitStepReports(step),
+        parentAbortSignal: this.deps.engineOptions.abortSignal,
+      },
+      subStep, parentStep, state, slotContext, cwd,
+    );
   }
 
   private async aggregateResults(
@@ -377,31 +278,4 @@ export class ParallelRunner {
     return { response: aggregatedResponse, instruction: aggregatedInstruction };
   }
 
-}
-
-function buildParallelLoggerOptions(
-  engineOptions: WorkflowEngineOptions,
-  stepName: string,
-  stepIteration: number,
-  subStepNames: string[],
-  iteration: number,
-  maxSteps: number,
-): ParallelLoggerOptions {
-  const options: ParallelLoggerOptions = {
-    subStepNames,
-    parentOnStream: engineOptions.onStream,
-    progressInfo: { iteration, maxSteps },
-  };
-
-  if (engineOptions.taskPrefix != null && engineOptions.taskColorIndex != null) {
-    return {
-      ...options,
-      taskLabel: engineOptions.taskPrefix,
-      taskColorIndex: engineOptions.taskColorIndex,
-      parentStepName: stepName,
-      stepIteration,
-    };
-  }
-
-  return options;
 }

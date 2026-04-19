@@ -30,6 +30,7 @@ function createContext(reportDir: string, lastResponse = 'Phase 1 result'): Phas
     cwd: reportDir,
     reportDir,
     language: 'en',
+    iteration: 1,
     lastResponse,
     getSessionId: (_persona: string) => currentSessionId,
     buildResumeOptions: (_step, sessionId, overrides) => ({

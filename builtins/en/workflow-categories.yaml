@@ -64,5 +64,7 @@ workflow_categories:
       - research
       - deep-research
       - magi
+      - default-perf
+      - roadmap
 show_others_category: true
 others_category_name: Others

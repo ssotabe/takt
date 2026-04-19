@@ -9,43 +9,14 @@
 import type { StreamCallback, StreamEvent } from '../types.js';
 import { stripAnsi } from '../../../shared/utils/text.js';
 import { LineTimeSliceBuffer } from './stream-buffer.js';
+import type { ParallelLoggerOptions, ParallelProgressInfo } from './parallel-logger-types.js';
+
+export type { ParallelLoggerOptions, ParallelProgressInfo } from './parallel-logger-types.js';
+export { buildParallelLoggerOptions } from './parallel-logger-types.js';
 
 /** ANSI color codes for sub-step prefixes (cycled in order) */
 const COLORS = ['\x1b[36m', '\x1b[33m', '\x1b[35m', '\x1b[32m'] as const; // cyan, yellow, magenta, green
 const RESET = '\x1b[0m';
-
-/** Progress information for parallel logger */
-export interface ParallelProgressInfo {
-  /** Current iteration (1-indexed) */
-  iteration: number;
-  /** Maximum steps allowed */
-  maxSteps: number;
-}
-
-export interface ParallelLoggerOptions {
-  /** Sub-step names (used to calculate prefix width) */
-  subStepNames: string[];
-  /** Parent onStream callback to delegate non-prefixed events */
-  parentOnStream?: StreamCallback;
-  /** Override process.stdout.write for testing */
-  writeFn?: (text: string) => void;
-  /** Progress information for display */
-  progressInfo?: ParallelProgressInfo;
-  /** Task label for rich parallel prefix display */
-  taskLabel?: string;
-  /** Task color index for rich parallel prefix display */
-  taskColorIndex?: number;
-  /** Parent step name for rich parallel prefix display */
-  parentStepName?: string;
-  /** Parent step iteration count for rich parallel prefix display */
-  stepIteration?: number;
-  /** Flush interval for partial text buffers in milliseconds */
-  flushIntervalMs?: number;
-  /** Minimum buffered chars before timed flush is allowed */
-  minTimedFlushChars?: number;
-  /** Maximum wait time for timed flush even without boundary */
-  maxTimedBufferMs?: number;
-}
 
 /**
  * Logger for parallel step execution.

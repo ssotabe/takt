@@ -1,0 +1,177 @@
+name: roadmap
+description: ロードマップ実行ワークフロー（タスク分解 → 2並列workflow_call → バッチループ）
+max_steps: 200
+initial_step: decompose
+personas:
+  decomposition-dependency-reviewer: ../facets/personas/decomposition-dependency-reviewer.md
+  decomposition-granularity-reviewer: ../facets/personas/decomposition-granularity-reviewer.md
+  decomposition-coverage-reviewer: ../facets/personas/decomposition-coverage-reviewer.md
+steps:
+  - name: decompose
+    persona: planner
+    edit: false
+    instruction: |
+      ユーザーのロードマップ（{task}）を分析し、独立実行可能なタスクに分解してください。
+
+      **手順:**
+      1. {report:roadmap-tasks.md} が存在する場合は Read ツールで読み、既完了タスクとリトライ回数を把握する
+      2. previous_response にレビューフィードバック（review_decomposition からの差し戻し）が含まれている場合:
+         - フィードバックの指摘事項を踏まえてタスク分割を再検討・修正する
+         - roadmap-tasks.md の「レビュー差し戻し回数」をインクリメントする
+         - レビュー差し戻し回数が3回を超えた場合は「要件不明」（ABORT）として遷移する
+      3. 通常フロー: ロードマップから独立実行可能なタスクを洗い出す
+
+      **出力形式:**
+      タスク計画を出力してください（スロット割り当ては不要）。
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: 分解完了
+        next: review_decomposition
+      - condition: タスクなし
+        next: COMPLETE
+      - condition: 要件不明
+        next: ABORT
+  - name: review_decomposition
+    parallel:
+      - name: dependency-review
+        persona: decomposition-dependency-reviewer
+        edit: false
+        instruction: |
+          previous_response を受け取り、タスク分割の依存関係・実行順序を検証してください。
+
+          **検証観点:**
+          - タスク間に暗黙の依存関係が見落とされていないか
+          - 実行順序が依存関係に矛盾していないか
+          - 並列実行可能なタスクが直列に配置されていないか
+
+          問題なければ approved、問題があれば needs_fix（具体的問題点と修正案を明記）。
+        rules:
+          - condition: approved
+          - condition: needs_fix
+      - name: granularity-review
+        persona: decomposition-granularity-reviewer
+        edit: false
+        instruction: |
+          previous_response を受け取り、タスクの粒度・スコープを検証してください。
+
+          **検証観点:**
+          - タスクが大きすぎて1回の実行で完了困難ではないか
+          - タスクが小さすぎて不必要に分割されていないか
+          - 各タスクのスコープが明確に定義されているか
+
+          問題なければ approved、問題があれば needs_fix（具体的問題点と修正案を明記）。
+        rules:
+          - condition: approved
+          - condition: needs_fix
+      - name: coverage-review
+        persona: decomposition-coverage-reviewer
+        edit: false
+        instruction: |
+          previous_response を受け取り、元のロードマップ要件の網羅性を検証してください。
+
+          **検証観点:**
+          - 元のロードマップの全要件が分割後のタスクでカバーされているか
+          - 漏れている要件や機能がないか
+          - 余分なタスク（元の要件にないもの）が含まれていないか
+
+          問題なければ approved、問題があれば needs_fix（具体的問題点と修正案を明記）。
+        rules:
+          - condition: approved
+          - condition: needs_fix
+    rules:
+      - condition: all("approved")
+        next: assign_slots
+      - condition: any("needs_fix")
+        next: decompose
+  - name: assign_slots
+    persona: planner
+    edit: false
+    instruction: |
+      {report:roadmap-tasks.md} を読み、次に実行すべきタスクをスロットに割り当ててください。
+
+      **手順:**
+      1. roadmap-tasks.md を Read ツールで読み、全タスクの一覧・ステータス・リトライ回数を把握する
+      2. previous_response に `## Slot Results` セクションが含まれている場合（バッチ実行後のフロー）:
+         - 失敗（ABORT/ERROR）したスロットのタスクを特定する
+         - 該当タスクのリトライ回数が上限（2回）未満であれば再割り当て対象とする
+         - 上限に達したタスクはスキップし、roadmap-tasks.md のステータスを「リトライ上限」に更新する
+      3. 未完了タスクから最大2件を選び、slot_1 / slot_2 に割り当てる
+         - 依存関係がある場合は、依存先が完了済みのタスクのみ選択する
+      4. 割り当て可能なタスクがない場合は「タスクなし」として遷移する
+      5. 2件未満の場合、不要なスロットには「タスクなし」と明記する
+
+      **出力形式:**
+      各スロットのタスク指示は、子ワークフローが単独で実行できるだけの十分な情報を含めてください:
+      - 背景・目的
+      - 実装内容の詳細
+      - 制約・注意事項
+      - 確認方法
+
+      ## slot_1
+      （タスク指示）
+
+      ## slot_2
+      （タスク指示 or タスクなし）
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: バッチ実行
+        next: execute_batch
+      - condition: タスクなし
+        next: COMPLETE
+  - name: execute_batch
+    parallel_config:
+      timeout_ms: 7200000
+    parallel:
+      - name: slot_1
+        kind: workflow_call
+        call: default-perf
+        rules:
+          - condition: COMPLETE
+          - condition: ABORT
+      - name: slot_2
+        kind: workflow_call
+        call: default-perf
+        rules:
+          - condition: COMPLETE
+          - condition: ABORT
+    rules:
+      - condition: all("COMPLETE")
+        next: check_remaining
+      - condition: any("ABORT")
+        next: check_remaining
+  - name: check_remaining
+    persona: planner
+    edit: false
+    instruction: |
+      前バッチの実行結果を確認し、失敗スロットの有無と残りタスクの有無を判定してください。
+
+      **手順:**
+      1. {report:roadmap-tasks.md} を Read ツールで読み、全タスクリストとリトライ回数を確認する
+      2. previous_response の `## Slot Results` セクションから各スロットの成否を確認する
+         - COMPLETE: 成功（処理済み）
+         - ABORT / ERROR: 失敗（リトライ対象）
+      3. 失敗スロットがある場合、roadmap-tasks.md の該当タスクのリトライ回数を確認する
+         - リトライ回数が上限（2回）未満 → 「失敗スロットあり」と判定
+         - 全失敗スロットのリトライ回数が上限（2回）に到達 → 「リトライ上限到達」と判定
+      4. 失敗スロットがなく、未実行の残りタスクがあれば「残りタスクあり」と判定する
+      5. 全タスク完了（成功済み + 残りタスクなし）であれば「全タスク完了」と判定する
+      6. roadmap-tasks.md にリトライ回数を更新して書き出す
+    output_contracts:
+      report:
+        - name: roadmap-tasks.md
+          format: plan
+    rules:
+      - condition: 失敗スロットあり
+        next: assign_slots
+      - condition: 残りタスクあり
+        next: assign_slots
+      - condition: 全タスク完了
+        next: COMPLETE
+      - condition: リトライ上限到達
+        next: ABORT

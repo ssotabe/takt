@@ -19,7 +19,8 @@ const log = createLogger('aggregate-evaluator');
  * - any("A", "B"): true when at least ONE sub-step matches "A" OR "B"
  *
  * Edge cases per spec:
- * - Sub-step with no matched rule: all() → false, any() → skip that sub-step
+ * - Sub-step with no matched rule (empty slot): excluded from evaluation for both all() and any()
+ * - No active sub-steps (all empty or 0 件): both → false
  * - No sub-steps (0 件): both → false
  * - Non-parallel step: both → false
  * - all("A", "B") with wrong number of sub-steps: false (logged as error)
@@ -36,6 +37,11 @@ export class AggregateEvaluator {
    */
   evaluate(): number {
     if (!this.step.rules || !this.step.parallel || this.step.parallel.length === 0) return -1;
+
+    const isActiveSlot = (sub: WorkflowStep): boolean => {
+      const output = this.state.stepOutputs.get(sub.name);
+      return output != null && output.matchedRuleIndex != null;
+    };
 
     for (let i = 0; i < this.step.rules.length; i++) {
       const rule = this.step.rules[i];
@@ -58,10 +64,14 @@ export class AggregateEvaluator {
             });
             continue;
           }
+          // Guard: all empty → false
+          if (!subSteps.some(isActiveSlot)) continue;
           const allMatch = subSteps.every((sub, idx) => {
+            // Empty slot: treat as true to preserve index alignment
+            if (!isActiveSlot(sub)) return true;
             const output = this.state.stepOutputs.get(sub.name);
-            if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
-            const matchedRule = sub.rules[output.matchedRuleIndex];
+            if (!output || !sub.rules) return false;
+            const matchedRule = sub.rules[output.matchedRuleIndex!];
             const expectedCondition = targetCondition[idx];
             if (!expectedCondition) return false;
             return matchedRule?.condition === expectedCondition;
@@ -71,8 +81,10 @@ export class AggregateEvaluator {
             return i;
           }
         } else {
-          // Single condition: all sub-steps must match the same condition
-          const allMatch = subSteps.every((sub) => {
+          // Single condition: all active sub-steps must match the same condition
+          const activeSubSteps = subSteps.filter(isActiveSlot);
+          if (activeSubSteps.length === 0) continue;
+          const allMatch = activeSubSteps.every((sub) => {
             const output = this.state.stepOutputs.get(sub.name);
             if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
             const matchedRule = sub.rules[output.matchedRuleIndex];
@@ -86,8 +98,10 @@ export class AggregateEvaluator {
       } else {
         // 'any'
         if (Array.isArray(targetCondition)) {
-          // Multiple conditions: at least one sub-step matches at least one condition
-          const anyMatch = subSteps.some((sub) => {
+          // Multiple conditions: at least one active sub-step matches at least one condition
+          const activeSubSteps = subSteps.filter(isActiveSlot);
+          if (activeSubSteps.length === 0) continue;
+          const anyMatch = activeSubSteps.some((sub) => {
             const output = this.state.stepOutputs.get(sub.name);
             if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
             const matchedRule = sub.rules[output.matchedRuleIndex];
@@ -98,8 +112,10 @@ export class AggregateEvaluator {
             return i;
           }
         } else {
-          // Single condition: at least one sub-step matches the condition
-          const anyMatch = subSteps.some((sub) => {
+          // Single condition: at least one active sub-step matches the condition
+          const activeSubSteps = subSteps.filter(isActiveSlot);
+          if (activeSubSteps.length === 0) continue;
+          const anyMatch = activeSubSteps.some((sub) => {
             const output = this.state.stepOutputs.get(sub.name);
             if (!output || output.matchedRuleIndex == null || !sub.rules) return false;
             const matchedRule = sub.rules[output.matchedRuleIndex];
