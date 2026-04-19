@@ -249,7 +249,7 @@ export interface AgentWorkflowStep extends WorkflowStepBase {
   effects?: never;
   outputContracts?: OutputContractEntry[];
   qualityGates?: string[];
-  parallel?: AgentWorkflowStep[];
+  parallel?: (AgentWorkflowStep | WorkflowCallStep)[];
   concurrency?: number;
   timeoutMs?: number;
   parallelConfig?: { readonly timeoutMs: number };
@@ -280,6 +280,8 @@ export interface SystemWorkflowStep extends WorkflowStepBase {
   qualityGates?: never;
   parallel?: never;
   concurrency?: never;
+  timeoutMs?: never;
+  parallelConfig?: never;
   arpeggio?: never;
   teamLeader?: never;
   policyContents?: never;
@@ -309,6 +311,7 @@ export interface WorkflowCallStep extends WorkflowStepBase {
   qualityGates?: never;
   parallel?: never;
   concurrency?: never;
+  parallelConfig?: never;
   arpeggio?: never;
   teamLeader?: never;
   policyContents?: never;

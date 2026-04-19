@@ -265,6 +265,8 @@ export interface WorkflowEngineOptions {
   retryNote?: string;
   /** Resume point for workflow_call-aware retries */
   resumePoint?: WorkflowResumePoint;
+  /** Initial previous response to set as child engine's lastOutput. */
+  initialPreviousResponse?: AgentResponse;
   /** Override report directory name (without parent path). */
   reportDirName?: string;
   /** Namespace appended under the shared run directories for nested workflow execution. */

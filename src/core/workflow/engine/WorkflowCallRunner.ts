@@ -24,6 +24,7 @@ import {
   applyWorkflowCallOverridesToPersonaProviders,
   type WorkflowCallExecutionResult,
 } from './WorkflowCallExecutor.js';
+import type { WorkflowCallSlotOverrides } from './slot-context.js';
 
 interface WorkflowCallRunnerDeps {
   getConfig: () => WorkflowConfig;
@@ -141,6 +142,8 @@ export class WorkflowCallRunner {
   async run(
     step: WorkflowCallStep,
     runtime: RuntimeStepResolution = this.resolveRuntime(step),
+    slotOverrides?: WorkflowCallSlotOverrides,
+    abortSignal?: AbortSignal,
   ): Promise<{ response: AgentResponse; instruction: string }> {
     const parentConfig = this.deps.getConfig();
     const childWorkflow = this.deps.resolveWorkflowCall({
@@ -183,6 +186,8 @@ export class WorkflowCallRunner {
       childProviderInfo,
       parentProviderOptions: parentProviderContext.providerOptions,
       personaProviders: this.buildChildPersonaProviders(step),
+      slotOverrides,
+      abortSignal,
     });
 
     const response = this.buildWorkflowCallResponse(

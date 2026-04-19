@@ -42,7 +42,7 @@ export class StateManager {
       structuredOutputs: new Map(),
       systemContexts: new Map(),
       effectResults: new Map(),
-      lastOutput: undefined,
+      lastOutput: options.initialPreviousResponse ?? undefined,
       previousResponseSourcePath: undefined,
       userInputs,
       personaSessions,

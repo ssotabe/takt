@@ -209,7 +209,7 @@ export function normalizeStepFromRaw(
         globalOverrides,
         workflowArpeggioPolicy,
         workflowMcpServersPolicy,
-      ) as AgentWorkflowStep,
+      ) as AgentWorkflowStep | WorkflowCallStep,
     );
     if (step.concurrency != null) {
       normalizedStep.concurrency = step.concurrency;

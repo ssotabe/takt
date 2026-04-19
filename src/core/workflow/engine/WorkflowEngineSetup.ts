@@ -153,6 +153,10 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     ...phaseRelay,
   });
 
+  // workflowCallRunner is created after parallelRunner; use lazy reference.
+  // eslint-disable-next-line prefer-const -- assigned after workflowCallRunner is constructed below
+  let workflowCallRunnerRef: WorkflowCallRunner | undefined;
+
   const parallelRunner = new ParallelRunner({
     optionsBuilder,
     stepExecutor,
@@ -162,6 +166,10 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     getInteractive: () => params.options.interactive === true,
     detectRuleIndex: params.detectRuleIndex,
     structuredCaller: params.structuredCaller,
+    workflowCallRunner: {
+      run: (...args) => workflowCallRunnerRef!.run(...args),
+    },
+    getRunSlug: () => params.runPaths.slug,
     ...phaseRelay,
   });
 
@@ -229,7 +237,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     resetCycleDetector: params.resetCycleDetector,
   });
 
-  const workflowCallRunner = new WorkflowCallRunner({
+  const workflowCallRunner: WorkflowCallRunner = new WorkflowCallRunner({
     getConfig: () => params.config,
     getMaxSteps: params.getMaxSteps,
     updateMaxSteps: params.updateMaxSteps,
@@ -246,6 +254,7 @@ export function createWorkflowEngineServices(params: WorkflowEngineSetupParams):
     resolveWorkflowCall: (request) => params.options.workflowCallResolver!(request),
     createEngine: params.createEngine,
   });
+  workflowCallRunnerRef = workflowCallRunner;
 
   return {
     optionsBuilder,

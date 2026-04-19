@@ -5,6 +5,7 @@
 import { z } from 'zod/v4';
 import { INTERACTIVE_MODES } from './interactive-mode.js';
 import { getWorkflowStepKind } from './workflow-step-kind.js';
+import { DEFAULT_PARALLEL_TIMEOUT_MS } from './workflow-defaults.js';
 import {
   McpServersSchema,
   StepProviderOptionsSchema,
@@ -250,7 +251,7 @@ function createWorkflowStepRawSchema(options?: { relaxWorkflowCallConditions?: b
   parallel: z.array(ParallelSubStepRawSchema).optional(),
   concurrency: z.number().int().min(1).optional(),
   parallel_config: z.object({
-    timeout_ms: z.number().int().positive().optional().default(1800000),
+    timeout_ms: z.number().int().positive().optional().default(DEFAULT_PARALLEL_TIMEOUT_MS),
   }).optional(),
   arpeggio: ArpeggioConfigRawSchema.optional(),
   team_leader: TeamLeaderConfigRawSchema.optional(),

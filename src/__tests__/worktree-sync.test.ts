@@ -23,6 +23,7 @@ const {
   mockStreamDisplayConstructor,
   mockStreamDisplayCreateHandler,
   mockAgentCall,
+  mockStageAndCommit,
 } = vi.hoisted(() => {
   const createHandler = vi.fn();
   return {
@@ -34,6 +35,7 @@ const {
     mockStreamDisplayConstructor: vi.fn(() => ({ createHandler })),
     mockStreamDisplayCreateHandler: createHandler,
     mockAgentCall: vi.fn(),
+    mockStageAndCommit: vi.fn(),
   };
 });
 
@@ -56,6 +58,10 @@ vi.mock('../shared/prompts/index.js', () => ({
 
 vi.mock('../shared/ui/index.js', () => ({
   StreamDisplay: mockStreamDisplayConstructor,
+}));
+
+vi.mock('../infra/task/git.js', () => ({
+  stageAndCommit: mockStageAndCommit,
 }));
 
 vi.mock('../shared/utils/index.js', () => ({

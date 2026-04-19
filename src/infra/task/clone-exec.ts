@@ -92,10 +92,14 @@ export function cloneAndIsolate(projectDir: string, clonePath: string, branch?: 
     }
   }
 
-  execFileSync('git', ['remote', 'remove', 'origin'], {
-    cwd: clonePath,
-    stdio: 'pipe',
-  });
+  try {
+    execFileSync('git', ['remote', 'remove', 'origin'], {
+      cwd: clonePath,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    log.debug('origin remote not found or already removed', { clonePath, error: String(err) });
+  }
 
   for (const key of ['user.name', 'user.email']) {
     try {
@@ -255,10 +259,14 @@ export async function cloneAndIsolateAbortable(
     }
   }
 
-  execFileSync('git', ['remote', 'remove', 'origin'], {
-    cwd: clonePath,
-    stdio: 'pipe',
-  });
+  try {
+    execFileSync('git', ['remote', 'remove', 'origin'], {
+      cwd: clonePath,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    log.debug('origin remote not found or already removed', { clonePath, error: String(err) });
+  }
 
   for (const key of ['user.name', 'user.email']) {
     try {

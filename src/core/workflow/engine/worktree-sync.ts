@@ -11,6 +11,7 @@ import { resolveConfigValues, getLanguage } from '../../../infra/config/index.js
 import { loadTemplate } from '../../../shared/prompts/index.js';
 import { StreamDisplay } from '../../../shared/ui/index.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
+import { stageAndCommit } from '../../../infra/task/git.js';
 
 const log = createLogger('worktree-sync');
 
@@ -52,7 +53,31 @@ export async function attemptAiConflictResolution(parentCwd: string, slotInstruc
   return response.status === 'done';
 }
 
+function buildCommitMessage(slotInstruction?: string): string {
+  if (!slotInstruction) {
+    return 'takt: auto-commit before merge';
+  }
+  const firstLine = slotInstruction.split('\n')[0] ?? '';
+  return `takt: ${firstLine.slice(0, 72)}`;
+}
+
+function commitBeforeMerge(childClonePath: string, slotInstruction?: string): void {
+  const message = buildCommitMessage(slotInstruction);
+  try {
+    stageAndCommit(childClonePath, message, {
+      allowGitHooks: false,
+      allowGitFilters: false,
+    });
+  } catch (err) {
+    log.info('Auto-commit skipped before merge', {
+      childClonePath, error: getErrorMessage(err),
+    });
+  }
+}
+
 export async function mergeChildBranch(childClonePath: string, parentCwd: string, slotInstruction?: string): Promise<void> {
+  commitBeforeMerge(childClonePath, slotInstruction);
+
   const headHash = execFileSync('git', ['-C', childClonePath, 'rev-parse', 'HEAD'], {
     encoding: 'utf-8',
     stdio: 'pipe',

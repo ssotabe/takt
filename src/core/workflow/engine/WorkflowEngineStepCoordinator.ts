@@ -2,6 +2,7 @@ import type { AgentResponse, LoopMonitorConfig, WorkflowState, WorkflowStep } fr
 import { getWorkflowStepKind, isSystemWorkflowStep, isWorkflowCallStep } from '../step-kind.js';
 import type { RuntimeStepResolution, WorkflowEngineOptions } from '../types.js';
 import { determineRuleTransition, type WorkflowRuleTransition } from './transitions.js';
+import type { WorkflowCallSlotOverrides } from './slot-context.js';
 
 interface WorkflowEngineStepCoordinatorDeps {
   config: {
@@ -69,6 +70,8 @@ interface WorkflowEngineStepCoordinatorDeps {
     run: (
       step: WorkflowStep & { call: string },
       runtime?: RuntimeStepResolution,
+      slotOverrides?: WorkflowCallSlotOverrides,
+      abortSignal?: AbortSignal,
     ) => Promise<{ response: AgentResponse; instruction: string }>;
     resolveRuntime: (step: WorkflowStep & { call: string }) => RuntimeStepResolution;
   };

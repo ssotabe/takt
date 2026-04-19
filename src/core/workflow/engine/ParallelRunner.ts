@@ -7,6 +7,8 @@
 
 import type {
   WorkflowStep,
+  WorkflowCallStep,
+  AgentWorkflowStep,
   WorkflowState,
   AgentResponse,
 } from '../../models/types.js';
@@ -16,46 +18,21 @@ import { needsStatusJudgmentPhase, runReportPhase, runStatusJudgmentPhase } from
 import { detectMatchedRule } from '../evaluation/index.js';
 import type { StatusJudgmentPhaseResult } from '../phase-runner.js';
 import { incrementStepIteration } from './state-manager.js';
-import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
+import { createLogger, getErrorMessage, Semaphore } from '../../../shared/utils/index.js';
 import { buildSessionKey } from '../session-key.js';
+import { buildAbortSignal } from './abort-signal.js';
+import { prepareSlotContext, type WorkflowCallSlotOverrides } from './slot-context.js';
+import { mergeChildBranch } from './worktree-sync.js';
+import { cleanupParallelWorktree } from './parallel-worktree.js';
+import { DEFAULT_PARALLEL_TIMEOUT_MS } from '../../models/workflow-defaults.js';
 import type { OptionsBuilder } from './OptionsBuilder.js';
 import type { StepExecutor } from './StepExecutor.js';
-import type { WorkflowEngineOptions, PhaseName, PhasePromptParts, JudgeStageEntry } from '../types.js';
+import type { WorkflowEngineOptions, RuntimeStepResolution, PhaseName, PhasePromptParts, JudgeStageEntry } from '../types.js';
 import type { ParallelLoggerOptions } from './parallel-logger.js';
 import type { StructuredCaller } from '../../../agents/structured-caller.js';
+import type { RuleEvaluatorContext } from '../evaluation/RuleEvaluator.js';
 
 const log = createLogger('parallel-runner');
-
-/**
- * Simple semaphore for controlling concurrency.
- * Limits the number of concurrent async operations.
- * Same implementation as ArpeggioRunner's Semaphore.
- */
-class Semaphore {
-  private running = 0;
-  private readonly waiting: Array<() => void> = [];
-
-  constructor(private readonly maxConcurrency: number) {}
-
-  async acquire(): Promise<void> {
-    if (this.running < this.maxConcurrency) {
-      this.running++;
-      return;
-    }
-    return new Promise<void>((resolve) => {
-      this.waiting.push(resolve);
-    });
-  }
-
-  release(): void {
-    if (this.waiting.length > 0) {
-      const next = this.waiting.shift()!;
-      next();
-    } else {
-      this.running--;
-    }
-  }
-}
 
 export interface ParallelRunnerDeps {
   readonly optionsBuilder: OptionsBuilder;
@@ -66,6 +43,15 @@ export interface ParallelRunnerDeps {
   readonly getInteractive: () => boolean;
   readonly detectRuleIndex: (content: string, stepName: string) => number;
   readonly structuredCaller: StructuredCaller;
+  readonly workflowCallRunner?: {
+    run: (
+      step: WorkflowStep & { call: string },
+      runtime?: RuntimeStepResolution,
+      slotOverrides?: WorkflowCallSlotOverrides,
+      abortSignal?: AbortSignal,
+    ) => Promise<{ response: AgentResponse; instruction: string }>;
+  };
+  readonly getRunSlug?: () => string;
   readonly onPhaseStart?: (
     step: WorkflowStep,
     phase: 1 | 2 | 3,
@@ -95,6 +81,18 @@ export interface ParallelRunnerDeps {
   ) => void;
 }
 
+/** Context shared across sub-step executions within a single parallel step run */
+interface ParallelRunContext {
+  readonly step: WorkflowStep;
+  readonly state: WorkflowState;
+  readonly task: string;
+  readonly maxSteps: number;
+  readonly stepIteration: number;
+  readonly parentRuleCtx: RuleEvaluatorContext;
+  readonly parallelLogger: ParallelLogger | undefined;
+  readonly updatePersonaSession: (persona: string, sessionId: string | undefined) => void;
+}
+
 export class ParallelRunner {
   constructor(
     private readonly deps: ParallelRunnerDeps,
@@ -122,24 +120,25 @@ export class ParallelRunner {
       stepIteration,
     });
 
-    // Create parallel logger for prefixed output (only when streaming is enabled)
     const parallelLogger = this.deps.engineOptions.onStream
-      ? new ParallelLogger(this.buildParallelLoggerOptions(step.name, stepIteration, subSteps.map((s) => s.name), state.iteration, maxSteps))
+      ? new ParallelLogger(buildParallelLoggerOptions(this.deps.engineOptions, step.name, stepIteration, subSteps.map((s) => s.name), state.iteration, maxSteps))
       : undefined;
 
     const parentPm = this.deps.optionsBuilder.resolveStepProviderModel(step);
-    const parentRuleCtx = {
-      state,
-      cwd: this.deps.getCwd(),
-      provider: parentPm.provider,
-      resolvedProvider: parentPm.provider,
-      resolvedModel: parentPm.model,
-      interactive: this.deps.getInteractive(),
-      detectRuleIndex: this.deps.detectRuleIndex,
-      structuredCaller: this.deps.structuredCaller,
+    const ctx: ParallelRunContext = {
+      step, state, task, maxSteps, stepIteration, parallelLogger, updatePersonaSession,
+      parentRuleCtx: {
+        state,
+        cwd: this.deps.getCwd(),
+        provider: parentPm.provider,
+        resolvedProvider: parentPm.provider,
+        resolvedModel: parentPm.model,
+        interactive: this.deps.getInteractive(),
+        detectRuleIndex: this.deps.detectRuleIndex,
+        structuredCaller: this.deps.structuredCaller,
+      },
     };
 
-    // Create semaphore for concurrency control (if configured)
     const semaphore = step.concurrency != null
       ? new Semaphore(step.concurrency)
       : undefined;
@@ -147,92 +146,20 @@ export class ParallelRunner {
       log.debug('Concurrency limit enabled', { step: step.name, concurrency: step.concurrency });
     }
 
-    // Run all sub-steps concurrently (failures are captured, not thrown)
-    // When semaphore is set, at most `concurrency` sub-steps execute simultaneously.
+    const cwd = this.deps.getCwd();
+    const runSlug = this.deps.getRunSlug?.() ?? this.deps.engineOptions.reportDirName ?? '';
+    const slotContext = prepareSlotContext(subSteps, state, runSlug, cwd);
+
     const settled = await Promise.allSettled(
       subSteps.map(async (subStep, index) => {
         if (semaphore) {
           await semaphore.acquire();
         }
         try {
-        const subIteration = incrementStepIteration(state, subStep.name);
-        const subInstruction = this.deps.stepExecutor.buildInstruction(subStep, subIteration, state, task, maxSteps);
-        const parentIteration = state.iteration;
-        const subPm = this.deps.optionsBuilder.resolveStepProviderModel(subStep);
-        const subRuleCtx = {
-          ...parentRuleCtx,
-          provider: subPm.provider,
-          resolvedProvider: subPm.provider,
-          resolvedModel: subPm.model,
-        };
-
-        // Session key uses buildSessionKey (persona:provider) — same as normal steps.
-        // This ensures sessions are shared across steps with the same persona+provider,
-        // while different providers (e.g., claude-eye vs codex-eye) get separate sessions.
-        const subSessionKey = buildSessionKey(subStep);
-
-        // Phase 1: main execution (Write excluded if sub-step has report)
-        const baseOptions = this.deps.optionsBuilder.buildAgentOptions(subStep);
-        let didEmitPhaseStart = false;
-
-        // Override onStream with parallel logger's prefixed handler (immutable)
-        const agentOptions = parallelLogger
-          ? { ...baseOptions, onStream: parallelLogger.createStreamHandler(subStep.name, index) }
-          : { ...baseOptions };
-        agentOptions.onPromptResolved = (promptParts: PhasePromptParts) => {
-          this.deps.onPhaseStart?.(subStep, 1, 'execute', subInstruction, promptParts, undefined, parentIteration);
-          didEmitPhaseStart = true;
-        };
-        const subResponse = await executeAgent(subStep.persona, subInstruction, agentOptions);
-        if (!didEmitPhaseStart) {
-          throw new Error(`Missing prompt parts for phase start: ${subStep.name}:1`);
-        }
-        updatePersonaSession(subSessionKey, subResponse.sessionId);
-        this.deps.onPhaseComplete?.(subStep, 1, 'execute', subResponse.content, subResponse.status, subResponse.error, undefined, parentIteration);
-
-        // Phase 2/3 context — no overrides needed, phase-runner uses buildSessionKey internally
-        const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(
-          state,
-          subResponse.content,
-          updatePersonaSession,
-          this.deps.onPhaseStart,
-          this.deps.onPhaseComplete,
-          this.deps.onJudgeStage,
-          parentIteration,
-        );
-
-        // Phase 2: report output for sub-step
-        if (subStep.outputContracts && subStep.outputContracts.length > 0) {
-          await runReportPhase(subStep, subIteration, phaseCtx);
-        }
-
-        // Phase 3: status judgment for sub-step
-        let subPhase3: StatusJudgmentPhaseResult | undefined;
-        try {
-          subPhase3 = needsStatusJudgmentPhase(subStep)
-            ? await runStatusJudgmentPhase(subStep, phaseCtx)
-            : undefined;
-        } catch (error) {
-          log.info('Phase 3 status judgment failed for sub-step, falling back to phase1 rule evaluation', {
-            step: subStep.name,
-            error: getErrorMessage(error),
-          });
-        }
-
-        let finalResponse: AgentResponse;
-        if (subPhase3) {
-          finalResponse = { ...subResponse, matchedRuleIndex: subPhase3.ruleIndex, matchedRuleMethod: subPhase3.method };
-        } else {
-          const match = await detectMatchedRule(subStep, subResponse.content, '', subRuleCtx);
-          finalResponse = match
-            ? { ...subResponse, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
-            : subResponse;
-        }
-
-        state.stepOutputs.set(subStep.name, finalResponse);
-        this.deps.stepExecutor.emitStepReports(subStep);
-
-        return { subStep, response: finalResponse, instruction: subInstruction };
+          if (subStep.kind === 'workflow_call') {
+            return await this.runWorkflowCallSubStep(subStep, step, state, slotContext, cwd);
+          }
+          return await this.runAgentSubStep(subStep, index, ctx);
         } finally {
           if (semaphore) {
             semaphore.release();
@@ -241,7 +168,149 @@ export class ParallelRunner {
       }),
     );
 
-    // Map settled results: fulfilled → as-is, rejected → error AgentResponse
+    return this.aggregateResults(settled, subSteps, ctx);
+  }
+
+  private async runAgentSubStep(
+    subStep: AgentWorkflowStep,
+    index: number,
+    ctx: ParallelRunContext,
+  ): Promise<{ subStep: AgentWorkflowStep; response: AgentResponse; instruction: string }> {
+    const timeoutMs = subStep.timeoutMs ?? ctx.step.parallelConfig?.timeoutMs ?? DEFAULT_PARALLEL_TIMEOUT_MS;
+    const { signal, dispose } = buildAbortSignal(timeoutMs, this.deps.engineOptions.abortSignal);
+    try {
+      const subIteration = incrementStepIteration(ctx.state, subStep.name);
+      const subInstruction = this.deps.stepExecutor.buildInstruction(subStep, subIteration, ctx.state, ctx.task, ctx.maxSteps);
+      const parentIteration = ctx.state.iteration;
+      const subPm = this.deps.optionsBuilder.resolveStepProviderModel(subStep);
+      const subRuleCtx = {
+        ...ctx.parentRuleCtx,
+        provider: subPm.provider,
+        resolvedProvider: subPm.provider,
+        resolvedModel: subPm.model,
+      };
+
+      const subSessionKey = buildSessionKey(subStep);
+      const baseOptions = this.deps.optionsBuilder.buildAgentOptions(subStep);
+      let didEmitPhaseStart = false;
+
+      const agentOptions = ctx.parallelLogger
+        ? { ...baseOptions, onStream: ctx.parallelLogger.createStreamHandler(subStep.name, index) }
+        : { ...baseOptions };
+      agentOptions.abortSignal = signal;
+      agentOptions.onPromptResolved = (promptParts: PhasePromptParts) => {
+        this.deps.onPhaseStart?.(subStep, 1, 'execute', subInstruction, promptParts, undefined, parentIteration);
+        didEmitPhaseStart = true;
+      };
+      const subResponse = await executeAgent(subStep.persona, subInstruction, agentOptions);
+      if (!didEmitPhaseStart) {
+        throw new Error(`Missing prompt parts for phase start: ${subStep.name}:1`);
+      }
+      ctx.updatePersonaSession(subSessionKey, subResponse.sessionId);
+      this.deps.onPhaseComplete?.(subStep, 1, 'execute', subResponse.content, subResponse.status, subResponse.error, undefined, parentIteration);
+
+      const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(
+        ctx.state, subResponse.content, ctx.updatePersonaSession,
+        this.deps.onPhaseStart, this.deps.onPhaseComplete, this.deps.onJudgeStage, parentIteration,
+      );
+
+      if (subStep.outputContracts && subStep.outputContracts.length > 0) {
+        await runReportPhase(subStep, subIteration, phaseCtx);
+      }
+
+      let subPhase3: StatusJudgmentPhaseResult | undefined;
+      try {
+        subPhase3 = needsStatusJudgmentPhase(subStep)
+          ? await runStatusJudgmentPhase(subStep, phaseCtx)
+          : undefined;
+      } catch (error) {
+        log.info('Phase 3 status judgment failed for sub-step, falling back to phase1 rule evaluation', {
+          step: subStep.name,
+          error: getErrorMessage(error),
+        });
+      }
+
+      let finalResponse: AgentResponse;
+      if (subPhase3) {
+        finalResponse = { ...subResponse, matchedRuleIndex: subPhase3.ruleIndex, matchedRuleMethod: subPhase3.method };
+      } else {
+        const match = await detectMatchedRule(subStep, subResponse.content, '', subRuleCtx);
+        finalResponse = match
+          ? { ...subResponse, matchedRuleIndex: match.index, matchedRuleMethod: match.method }
+          : subResponse;
+      }
+
+      ctx.state.stepOutputs.set(subStep.name, finalResponse);
+      this.deps.stepExecutor.emitStepReports(subStep);
+
+      return { subStep, response: finalResponse, instruction: subInstruction };
+    } finally {
+      dispose();
+    }
+  }
+
+  private async runWorkflowCallSubStep(
+    subStep: WorkflowCallStep,
+    parentStep: WorkflowStep,
+    state: WorkflowState,
+    slotContext: ReturnType<typeof prepareSlotContext>,
+    cwd: string,
+  ): Promise<{ subStep: WorkflowStep; response: AgentResponse; instruction: string }> {
+    const slotOverrides = slotContext?.overrides.get(subStep.name);
+    const worktreeInfo = slotContext?.worktrees.get(subStep.name);
+
+    if (slotContext && !slotOverrides) {
+      const skipResponse: AgentResponse = {
+        persona: subStep.name,
+        status: 'done',
+        content: '',
+        timestamp: new Date(),
+      };
+      state.stepOutputs.set(subStep.name, skipResponse);
+      return { subStep, response: skipResponse, instruction: '' };
+    }
+
+    if (!this.deps.workflowCallRunner) {
+      throw new Error(`workflow_call sub-step "${subStep.name}" requires workflowCallRunner`);
+    }
+
+    const timeoutMs = subStep.timeoutMs ?? parentStep.parallelConfig?.timeoutMs ?? DEFAULT_PARALLEL_TIMEOUT_MS;
+    const { signal, dispose } = buildAbortSignal(timeoutMs, this.deps.engineOptions.abortSignal);
+
+    let callResult: { response: AgentResponse; instruction: string } | undefined;
+    try {
+      callResult = await this.deps.workflowCallRunner.run(
+        subStep,
+        undefined,
+        slotOverrides,
+        signal,
+      );
+      state.stepOutputs.set(subStep.name, callResult.response);
+      this.deps.stepExecutor.emitStepReports(subStep);
+      return { subStep, response: callResult.response, instruction: callResult.instruction };
+    } finally {
+      if (worktreeInfo) {
+        try {
+          if (callResult) {
+            const matchedCondition = subStep.rules?.[callResult.response.matchedRuleIndex ?? -1]?.condition;
+            const shouldMerge = matchedCondition !== 'ABORT';
+            if (shouldMerge) {
+              await mergeChildBranch(worktreeInfo.path, cwd, slotOverrides?.initialPreviousResponse?.content);
+            }
+          }
+        } finally {
+          await cleanupParallelWorktree(worktreeInfo.path, cwd);
+        }
+      }
+      dispose();
+    }
+  }
+
+  private async aggregateResults(
+    settled: PromiseSettledResult<{ subStep: WorkflowStep | AgentWorkflowStep | WorkflowCallStep; response: AgentResponse; instruction: string }>[],
+    subSteps: (AgentWorkflowStep | WorkflowCallStep)[],
+    ctx: ParallelRunContext,
+  ): Promise<{ response: AgentResponse; instruction: string }> {
     const subResults = settled.map((result, index) => {
       if (result.status === 'fulfilled') {
         return result.value;
@@ -256,21 +325,19 @@ export class ParallelRunner {
         timestamp: new Date(),
         error: errorMsg,
       };
-      state.stepOutputs.set(failedStep.name, errorResponse);
+      ctx.state.stepOutputs.set(failedStep.name, errorResponse);
       return { subStep: failedStep, response: errorResponse, instruction: '' };
     });
 
-    // If all sub-steps failed (error-originated), throw
     const allFailed = subResults.every(r => r.response.error != null);
     if (allFailed) {
       const errors = subResults.map(r => `${r.subStep.name}: ${r.response.error}`).join('; ');
       throw new Error(`All parallel sub-steps failed: ${errors}`);
     }
 
-    // Print completion summary
-    if (parallelLogger) {
-      parallelLogger.printSummary(
-        step.name,
+    if (ctx.parallelLogger) {
+      ctx.parallelLogger.printSummary(
+        ctx.step.name,
         subResults.map((r) => ({
           name: r.subStep.name,
           condition: r.response.matchedRuleIndex != null && r.subStep.rules
@@ -280,7 +347,6 @@ export class ParallelRunner {
       );
     }
 
-    // Aggregate sub-step outputs into the parent step response
     const aggregatedContent = subResults
       .map((r) => `## ${r.subStep.name}\n${r.response.content}`)
       .join('\n\n---\n\n');
@@ -289,56 +355,53 @@ export class ParallelRunner {
       .map((r) => r.instruction)
       .join('\n\n');
 
-    // Parent step uses aggregate conditions, so tagContent is empty
-    const match = await detectMatchedRule(step, aggregatedContent, '', parentRuleCtx);
+    const match = await detectMatchedRule(ctx.step, aggregatedContent, '', ctx.parentRuleCtx);
 
     const aggregatedResponse: AgentResponse = {
-      persona: step.name,
+      persona: ctx.step.name,
       status: 'done',
       content: aggregatedContent,
       timestamp: new Date(),
       ...(match && { matchedRuleIndex: match.index, matchedRuleMethod: match.method }),
     };
 
-    state.stepOutputs.set(step.name, aggregatedResponse);
-    state.lastOutput = aggregatedResponse;
+    ctx.state.stepOutputs.set(ctx.step.name, aggregatedResponse);
+    ctx.state.lastOutput = aggregatedResponse;
     this.deps.stepExecutor.persistPreviousResponseSnapshot(
-      state,
-      step.name,
-      stepIteration,
+      ctx.state,
+      ctx.step.name,
+      ctx.stepIteration,
       aggregatedResponse.content,
     );
-    this.deps.stepExecutor.emitStepReports(step);
+    this.deps.stepExecutor.emitStepReports(ctx.step);
     return { response: aggregatedResponse, instruction: aggregatedInstruction };
   }
 
-  private buildParallelLoggerOptions(
-    stepName: string,
-    stepIteration: number,
-    subStepNames: string[],
-    iteration: number,
-    maxSteps: number,
-  ): ParallelLoggerOptions {
-    const options: ParallelLoggerOptions = {
-      subStepNames,
-      parentOnStream: this.deps.engineOptions.onStream,
-      progressInfo: {
-        iteration,
-        maxSteps,
-      },
+}
+
+function buildParallelLoggerOptions(
+  engineOptions: WorkflowEngineOptions,
+  stepName: string,
+  stepIteration: number,
+  subStepNames: string[],
+  iteration: number,
+  maxSteps: number,
+): ParallelLoggerOptions {
+  const options: ParallelLoggerOptions = {
+    subStepNames,
+    parentOnStream: engineOptions.onStream,
+    progressInfo: { iteration, maxSteps },
+  };
+
+  if (engineOptions.taskPrefix != null && engineOptions.taskColorIndex != null) {
+    return {
+      ...options,
+      taskLabel: engineOptions.taskPrefix,
+      taskColorIndex: engineOptions.taskColorIndex,
+      parentStepName: stepName,
+      stepIteration,
     };
-
-    if (this.deps.engineOptions.taskPrefix != null && this.deps.engineOptions.taskColorIndex != null) {
-      return {
-        ...options,
-        taskLabel: this.deps.engineOptions.taskPrefix,
-        taskColorIndex: this.deps.engineOptions.taskColorIndex,
-        parentStepName: stepName,
-        stepIteration,
-      };
-    }
-
-    return options;
   }
 
+  return options;
 }

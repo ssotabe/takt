@@ -16,6 +16,7 @@ import type {
   WorkflowEngineOptions,
   WorkflowSharedRuntimeState,
 } from '../types.js';
+import type { WorkflowCallSlotOverrides } from './slot-context.js';
 
 function encodeWorkflowNamespaceValue(value: string): string {
   return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -95,6 +96,8 @@ interface ExecuteWorkflowCallRequest {
   };
   parentProviderOptions: WorkflowEngineOptions['providerOptions'];
   personaProviders: WorkflowEngineOptions['personaProviders'];
+  slotOverrides?: WorkflowCallSlotOverrides;
+  abortSignal?: AbortSignal;
 }
 
 export type WorkflowCallExecutionResult = WorkflowState & {
@@ -193,7 +196,8 @@ export class WorkflowCallExecutor {
     const options = this.deps.getOptions();
     const parentConfig = this.deps.getConfig();
     const childResumePoint = this.resolveChildResumePoint(request.step, request.childWorkflow);
-    const childEngine = this.deps.createEngine(request.childWorkflow, this.deps.getCwd(), this.deps.task, {
+    const childCwd = request.slotOverrides?.cwd ?? this.deps.getCwd();
+    const childEngine = this.deps.createEngine(request.childWorkflow, childCwd, this.deps.task, {
       ...options,
       maxStepsOverride: this.deps.sharedRuntime.maxSteps ?? this.deps.getMaxSteps(),
       initialSessions: Object.fromEntries(this.deps.state.personaSessions),
@@ -207,13 +211,15 @@ export class WorkflowCallExecutor {
       startStep: this.resolveChildResumeStartStep(request.childWorkflow, childResumePoint),
       resumePoint: childResumePoint,
       initialIteration: this.deps.state.iteration,
-      reportDirName: this.deps.runPaths.slug,
+      reportDirName: request.slotOverrides?.reportDirName ?? this.deps.runPaths.slug,
       runPathNamespace: this.buildWorkflowCallNamespace(request.step, request.childWorkflow),
       sharedRuntime: this.deps.sharedRuntime,
       resumeStackPrefix: [
         ...this.deps.resumeStackPrefix,
         buildWorkflowResumePointEntry(parentConfig, request.step.name, 'workflow_call'),
       ],
+      ...(request.abortSignal ? { abortSignal: request.abortSignal } : {}),
+      ...(request.slotOverrides?.initialPreviousResponse ? { initialPreviousResponse: request.slotOverrides.initialPreviousResponse } : {}),
     });
 
     this.relayChildEvents(childEngine);

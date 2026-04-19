@@ -19,7 +19,7 @@ import type { RunAgentOptions } from '../../../agents/runner.js';
 import { executeAgent } from '../../../agents/agent-usecases.js';
 import { detectMatchedRule } from '../evaluation/index.js';
 import { incrementStepIteration } from './state-manager.js';
-import { createLogger } from '../../../shared/utils/index.js';
+import { createLogger, Semaphore } from '../../../shared/utils/index.js';
 import type { OptionsBuilder } from './OptionsBuilder.js';
 import type { StepExecutor } from './StepExecutor.js';
 import type { PhaseName, PhasePromptParts } from '../types.js';
@@ -53,36 +53,6 @@ export interface ArpeggioRunnerDeps {
     phaseExecutionId?: string,
     iteration?: number,
   ) => void;
-}
-
-/**
- * Simple semaphore for controlling concurrency.
- * Limits the number of concurrent async operations.
- */
-class Semaphore {
-  private running = 0;
-  private readonly waiting: Array<() => void> = [];
-
-  constructor(private readonly maxConcurrency: number) {}
-
-  async acquire(): Promise<void> {
-    if (this.running < this.maxConcurrency) {
-      this.running++;
-      return;
-    }
-    return new Promise<void>((resolve) => {
-      this.waiting.push(resolve);
-    });
-  }
-
-  release(): void {
-    if (this.waiting.length > 0) {
-      const next = this.waiting.shift()!;
-      next();
-    } else {
-      this.running--;
-    }
-  }
 }
 
 /** Execute a single batch with retry logic */
